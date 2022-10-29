@@ -2,6 +2,7 @@ use std::path::Path;
 
 use error::Result;
 
+pub mod ast;
 pub mod error;
 
 pub fn parse<'a>(_p: impl AsRef<Path> + 'a) -> Result<'a, ()> {
