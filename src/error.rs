@@ -14,16 +14,11 @@ pub struct Error<'a> {
 }
 
 #[derive(Debug)]
-#[non_exhaustive]
-pub enum ErrorType {
-    InternalError,
-}
+pub enum ErrorType {}
 
 impl fmt::Display for ErrorType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ErrorType::InternalError => write!(f, "internal error"),
-        }
+    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {}
     }
 }
 
@@ -43,9 +38,7 @@ impl<'a> fmt::Display for Error<'a> {
 
 impl<'a> StdError for Error<'a> {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        match &self.ty {
-            ErrorType::InternalError => None,
-        }
+        match self.ty {}
     }
 }
 

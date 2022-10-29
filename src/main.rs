@@ -1,6 +1,7 @@
 use clap::Parser;
 
 use std::{
+    borrow::Cow,
     fs,
     path::PathBuf,
     process::{exit, ExitCode},
@@ -20,13 +21,12 @@ struct Cli {
 
 fn report_error<'a>(err: Error<'a>) -> ! {
     eprintln!("{}", err);
-    match err.ty {
-        ErrorType::InternalError => exit(2),
-        _ => exit(1),
-    }
+    exit(1)
 }
 
 fn main() -> ExitCode {
+    std::panic::set_hook(Box::new(panic_hook));
+
     let args = {
         let mut args = Cli::parse();
         args.path = match args.path.canonicalize() {
@@ -69,13 +69,44 @@ fn main() -> ExitCode {
         return ExitCode::from(0);
     }
 
-    let typed = petitc::typecheck(&args.path, parsed).map_err(report_error).unwrap();
+    let typed = petitc::typecheck(&args.path, parsed)
+        .map_err(report_error)
+        .unwrap();
 
     if args.type_only {
         return ExitCode::from(0);
     }
 
-    let _ = petitc::compile(&args.path, typed).map_err(report_error).unwrap();
+    let _ = petitc::compile(&args.path, typed)
+        .map_err(report_error)
+        .unwrap();
 
     ExitCode::from(0)
+}
+
+fn panic_hook(info: &std::panic::PanicInfo<'_>) {
+    let payload = info.payload();
+    let msg = if let Some(msg) = payload.downcast_ref::<&str>() {
+        msg
+    } else if let Some(msg) = payload.downcast_ref::<String>() {
+        msg
+    } else {
+        "unknown cause"
+    };
+
+    // Current implementation always returns the Some variant
+    let location = if let Some(loc) = info.location() {
+        Cow::Owned(format!(
+            "File \"{}\", line {}, characters {}-{2}:",
+            loc.file(),
+            loc.line(),
+            loc.column()
+        ))
+    } else {
+        Cow::Borrowed("Unknown location:")
+    };
+
+    eprintln!("{}\nFatal internal error: {}", location, msg);
+
+    exit(2)
 }
