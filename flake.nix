@@ -1,6 +1,13 @@
 {
   description = "petitc";
   inputs = {
+    beans = {
+      url = github:theblackbeans/beans;
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        utils.follows = "utils";
+      };
+    };
     nixpkgs.url = github:NixOS/nixpkgs/nixpkgs-unstable;
     utils.url = github:numtide/flake-utils;
     rust-overlay = {
@@ -13,7 +20,7 @@
     naersk.url = github:nix-community/naersk;
   };
 
-  outputs = { self, nixpkgs, utils, naersk, rust-overlay }:
+  outputs = { self, nixpkgs, utils, naersk, rust-overlay, beans }:
     utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -39,13 +46,14 @@
         };
         devShell = with pkgs; mkShell {
           packages = [
+            gdb
             rust
-            rustc
             cargo
             cargo-edit
             rustfmt
             rustPackages.clippy
             rust-analyzer
+            beans.defaultPackage.${system}
           ];
         };
       });
