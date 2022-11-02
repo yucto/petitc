@@ -1,4 +1,4 @@
-use std::{error::Error as StdError, fmt, ops::RangeInclusive, path::Path};
+use std::{error::Error as StdError, fmt, ops::RangeInclusive, path::PathBuf};
 
 #[derive(Debug)]
 pub struct Location {
@@ -7,8 +7,8 @@ pub struct Location {
 }
 
 #[derive(Debug)]
-pub struct Error<'a> {
-    pub path: &'a Path,
+pub struct Error {
+    pub path: PathBuf,
     pub loc: Location,
     pub ty: ErrorType,
 }
@@ -22,7 +22,7 @@ impl fmt::Display for ErrorType {
     }
 }
 
-impl<'a> fmt::Display for Error<'a> {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -36,10 +36,10 @@ impl<'a> fmt::Display for Error<'a> {
     }
 }
 
-impl<'a> StdError for Error<'a> {
+impl StdError for Error {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self.ty {}
     }
 }
 
-pub type Result<'a, T> = std::result::Result<T, Error<'a>>;
+pub type Result<T> = std::result::Result<T, Error>;

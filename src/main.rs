@@ -7,7 +7,7 @@ use std::{
     process::{exit, ExitCode},
 };
 
-use petitc::error::{Error, ErrorType};
+use petitc::error::Error;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -19,7 +19,7 @@ struct Cli {
     type_only: bool,
 }
 
-fn report_error<'a>(err: Error<'a>) -> ! {
+fn report_error(err: Error) -> ! {
     eprintln!("{}", err);
     exit(1)
 }
