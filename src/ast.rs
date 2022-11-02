@@ -1,3 +1,8 @@
+#[allow(dead_code)]
+pub struct File {
+    fun_decls: Vec<FunDecl>,
+}
+
 pub struct FunDecl {
     pub ty: Type,
     pub name: String,
