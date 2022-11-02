@@ -1,138 +1,137 @@
+Option[content] ::=
+  <None>
+  content@value <Some>;
+
+NonEmptyList[content, separation] ::=
+  content@head <Nil>
+  content@head separation NonEmptyList[content, separation]@tail <Cons>;
+
+List[content, separation] ::=
+  Option[NonEmptyList[content, separation]]@value <>;
+
+Empty ::=
+  <>;
+
 @File ::=
-  Includes FunctionDeclarations@decls <>;
-
-Includes ::=
-  <nil: true>
-  INCLUDE Includes <nil: false>;
-
-FunctionDeclarations ::=
-  <nil: true>
-  FunctionDeclaration@declr FunctionDeclarations@rest <nil: false>;
+  List[INCLUDE, Empty] List[FunctionDeclaration, Empty]@decls <>;
 
 FunctionDeclaration ::=
-  Type@rettype IDENT.0@name LPAR TypedArgs@args RPAR Block@block <>;
+  Type@rettype IDENT.0@name LPAR List[TypedParam, COMMA]@args RPAR Block@block <>;
 
 Type ::=
-  VOID <ty: "void">
-  INTTY <ty: "int">
-  BOOL <ty: "bool">
-  Type@pointed ASTERISK <ty: "pointer">;
-
-TypedArgs ::=
-  <nil: true>
-  TypedParam@param COMMA TypedArgs@rest <nil: false>;
+  VOID <Void>
+  INTTY <Int>
+  BOOL <Bool>
+  Type@pointed ASTERISK <Pointer>;
 
 TypedParam ::=
   Type@type IDENT@name <>;
 
 Int ::=
-  INT.0@value <int: "int">
-  CHAR.0@value <int: "char">;
+  INT.0@value <Int>
+  CHAR.0@value <Char>;
 
 Bool ::=
-  TRUE <bool: true>
-  FALSE <bool: false>;
+  TRUE <True>
+  FALSE <False>;
 
 Expr ::=
-  SIZEOF LPAR Type@type RPAR <op: "sizeof">
-  IDENT.0@name LPAR Args@args RPAR <op: "call">
-  EqualExpr@this <op: "through">;
+  EqualExpr@this <Through>;
 
 EqualExpr ::=
-  OrExpr@key EQUAL EqualExpr@value <op: "assign">
-  OrExpr@this <op: "through">;
+  OrExpr@key EQUAL EqualExpr@value <Assign>
+  OrExpr@this <Through>;
 
 OrExpr ::=
-  AndExpr@left OR OrExpr@right <op: "or">
-  AndExpr@this <op: "through">;
+  AndExpr@left OR OrExpr@right <Or>
+  AndExpr@this <Through>;
 
 AndExpr ::=
-  EqExpr@left AND AndExpr@right <op: "and">
-  EqExpr@this <op: "through">;
+  EqExpr@left AND AndExpr@right <Op>
+  EqExpr@this <Through>;
 
 EqExpr ::=
-  CmpExpr@left EQ EqExpr@right <op: "eq">
-  CmpExpr@left NEQ EqExpr@right <op: "neq">
-  CmpExpr@this <op: "through">;
+  CmpExpr@left EQ EqExpr@right <Equal>
+  CmpExpr@left NEQ EqExpr@right <NotEqual>
+  CmpExpr@this <Through>;
 
 CmpExpr ::=
-  PmExpr@left LT CmpExpr@right <op: "lt">
-  PmExpr@left GT CmpExpr@right <op: "gt">
-  PmExpr@left GEQ CmpExpr@right <op: "geq">
-  PmExpr@left LEQ CmpExpr@right <op: "leq">
-  PmExpr@this <op: "through">;
+  PmExpr@left LT CmpExpr@right <Lt>
+  PmExpr@left GT CmpExpr@right <Gt>
+  PmExpr@left GEQ CmpExpr@right <Geq>
+  PmExpr@left LEQ CmpExpr@right <Leq>
+  PmExpr@this <Through>;
 
 PmExpr ::=
-  MdmExpr@left PLUS PmExpr@right <op: "add">
-  MdmExpr@left MINUS PmExpr@right <op: "sub">
-  MdmExpr@this <op: "through">;
+  MdmExpr@left PLUS PmExpr@right <Add>
+  MdmExpr@left MINUS PmExpr@right <Sub>
+  MdmExpr@this <Through>;
 
 MdmExpr ::=
-  UnaryExpr@left ASTERISK MdmExpr@right <op: "mul">
-  UnaryExpr@left SLASH MdmExpr@right <op: "div">
-  UnaryExpr@left PERCENT MdmExpr@right <op: "mod">
-  UnaryExpr@this <op: "through">;
+  UnaryExpr@left ASTERISK MdmExpr@right <Mul>
+  UnaryExpr@left SLASH MdmExpr@right <Div>
+  UnaryExpr@left PERCENT MdmExpr@right <Mod>
+  UnaryExpr@this <Through>;
 
 UnaryExpr ::=
-  EXCLAM UnaryExpr@value <op: "not">
-  PLUSPLUS UnaryExpr@value <op: "incrl">
-  UnaryExpr@value PLUSPLUS <op: "incrr">
-  MINUSMINUS UnaryExpr@value <op: "decrl">
-  UnaryExpr@value MINUSMINUS <op: "decrr">
-  AMPERSAND UnaryExpr@value <op: "borrow">
-  ASTERISK UnaryExpr@value <op: "deref">
-  PLUS UnaryExpr@value <op: "plus">
-  MINUS UnaryExpr@value <op: "minus">
-  IndexExpr@this <op: "through">;
-
-IndexExpr ::=
-  IndexExpr@array LBRACKET Expr@index RBRACKET <op: "index">
-  LiteralExpr@this <op: "through">;
+  EXCLAM UnaryExpr@value <Not>
+  PLUSPLUS UnaryExpr@value <Incrl>
+  UnaryExpr@value PLUSPLUS <Incrr>
+  MINUSMINUS UnaryExpr@value <Decrl>
+  UnaryExpr@value MINUSMINUS <Decrr>
+  AMPERSAND UnaryExpr@value <Borrow>
+  ASTERISK UnaryExpr@value <Deref>
+  PLUS UnaryExpr@value <Plus>
+  MINUS UnaryExpr@value <Minus>
+  IDENT.0@value <Ident>
+  SIZEOF LPAR Type@type RPAR <Sizeof>
+  IDENT.0@name LPAR List[Expr, COMMA]@args RPAR <Call>
+  UnaryExpr@array LBRACKET Expr@index RBRACKET <
+    Deref
+    value: PmExpr {
+      Add
+      left: array
+      right: index
+    }
+  >
+  LiteralExpr@this <Through>;
 
 LiteralExpr ::=
-  Int@value <expr: "int">
-  Bool@value <expr: "bool">
-  NULL <expr: "null">
-  LPAR Expr@this RPAR <op: "par">;
+  Int@value <Int>
+  Bool@value <Bool>
+  NULL <Null>
+  LPAR Expr@this RPAR <Through>;
 
 Statement ::=
-  SEMICOLON <instr: "none">
-  Expr@stmt SEMICOLON <instr: "regular">
-  IF LPAR Expr@condition RPAR Instruction@then <instr: "if">
-  IF LPAR Expr@condition RPAR Instruction@then ELSE Instruction@else <instr: "ifelse">
-  WHILE LPAR Expr@condition RPAR Instruction@stmts <instr: "while">
-  FOR LPAR OptDeclVar@init SEMICOLON OptExpr@test SEMICOLON Exprs@step RPAR
-    Statement@block <instr: "for">
-  Block@stmts <instr: "bloc">
-  RETURN SEMICOLON <instr: "ret">
-  RETURN Expr@value SEMICOLON <instr: "retval">
-  BREAK SEMICOLON <instr: "break">
-  CONTINUE SEMICOLON <instr: "continue">;
+  SEMICOLON <None>
+  Expr@stmt SEMICOLON <Regular>
+  IF LPAR Expr@condition RPAR Statement@then Option[Else]@else <If>
+  WHILE LPAR Expr@condition RPAR Statement@stmts <While>
+  FOR
+    LPAR
+      Option[VariableDeclaration]@init SEMICOLON
+      Option[Expr]@test SEMICOLON
+      List[Expr, COMMA]@step
+    RPAR
+    Statement@block <For>
+  Block@stmts <Block>
+  RETURN Option[Expr]@value SEMICOLON <Return>
+  BREAK SEMICOLON <Break>
+  CONTINUE SEMICOLON <Continue>;
 
-OptDeclVar ::=
-  <none: true>
-  DeclVar@decl <none: false>;
-
-OptExpr ::=
-  <none: true>
-  Expr <none: false>;
-
-Exprs ::=
-  <tnil: "none">
-  Expr@expr <tnil: "one">
-  Expr@expr COMMA Exprs@rest <tnil: "rest">;
+Else ::=
+  ELSE Statement@else <>;
 
 Block ::=
-  LBRACE DeclStatements@stmts RBRACE <>;
-
-DeclStatements ::=
-  <nil: true>
-  DeclStatement@dclstmt DeclStatements@rest <nil: false>;
+  LBRACE List[DeclStatement, Empty]@stmts RBRACE <>;
 
 DeclStatement ::=
-  VariableDeclaration@declaration <>
-  Statement@stmt <>;
+  FunctionDeclaration <Function>
+  VariableDeclaration@declaration SEMICOLON <Declaration>
+  Statement@stmt <Statement>;
 
 VariableDeclaration ::=
-  Type@type IDENT.0@name <hasvalue: false>
-  Type@type IDENT.0@name EQUAL Expr@value <hasvalue: true>;
+  Type@type IDENT.0@name Option[Definition] <>;
+
+Definition ::=
+  EQUAL Expr@value <>;
