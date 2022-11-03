@@ -1,8 +1,10 @@
+/// All strings are represented by an index in a Vec<String>
+/// which should be passed along with the AST
+pub type Ident = usize;
+
 pub struct File {
     pub fun_decls: Vec<FunDecl>,
 }
-
-pub type Ident = usize;
 
 pub struct FunDecl {
     pub ty: Type,

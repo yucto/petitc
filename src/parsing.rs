@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::Path};
 
 use crate::ast::{
-    BasisType, BinOp, DeclOrInstr, Expr, File, FunDecl, Instr, Type, VarDecl,
+    BinOp, DeclOrInstr, Expr, File, FunDecl, Instr, Type, VarDecl,
 };
 
 use crate::error::Result;
@@ -469,49 +469,13 @@ fn read_block(
 }
 
 fn read_type(ast: AST) -> Type {
-    enum TransparentType {
-        Void,
-        Int,
-        Bool,
-        Pointer(Box<TransparentType>),
-    }
-
-    impl From<TransparentType> for Type {
-        fn from(ty: TransparentType) -> Type {
-            match ty {
-                TransparentType::Void => Type {
-                    basis: BasisType::Void,
-                    indirection_count: 0,
-                },
-                TransparentType::Bool => Type {
-                    basis: BasisType::Bool,
-                    indirection_count: 0,
-                },
-                TransparentType::Int => Type {
-                    basis: BasisType::Int,
-                    indirection_count: 0,
-                },
-                TransparentType::Pointer(ty) => {
-                    let mut a: Type = Type::from(*ty);
-                    a.indirection_count += 1;
-                    a
-                }
-            }
-        }
-    }
-
-    fn aux(ast: AST) -> TransparentType {
-        let mut node = node!(ast);
-        match_variant! {(node) {
-            "Void" => TransparentType::Void,
-                "Int" => TransparentType::Int,
-                "Bool" => TransparentType::Bool,
-                "Pointer" => TransparentType::Pointer(Box::new(aux(
-                    get!(node, "pointed"),
-                ))),
-        }}
-    }
-    aux(ast).into()
+    let mut node = node!(ast);
+    match_variant! {(node) {
+        "Void" => Type::VOID,
+        "Int" => Type::INT,
+        "Bool" => Type::BOOL,
+        "Pointer" => read_type(get!(node, "pointed")).ptr()
+    }}
 }
 
 fn read_typed_param(
