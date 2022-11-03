@@ -1,6 +1,6 @@
 #[allow(dead_code)]
 pub struct File {
-    fun_decls: Vec<FunDecl>,
+    pub fun_decls: Vec<FunDecl>,
 }
 
 pub struct FunDecl {
@@ -44,27 +44,27 @@ pub enum BinOp {
 #[rustfmt::skip]
 pub enum Expr {
     Int(i64), True, False, Null,
-    Ident,
+    Ident(String),
     Deref(Box<Expr>),
     // Index { lhs, rhs } represents lhs[rhs]
     Index { lsh: Box<Expr>, rhs: Box<Expr> },
     // Assign { lsh, rhs } represents lhs = rhs
     Assign { lsh: Box<Expr>, rhs: Box<Expr> },
     Call { name: String, args: Vec<Expr> },
-    PrefixIncr(Box<Expr>), PreficDecr(Box<Expr>),
+    PrefixIncr(Box<Expr>), PrefixDecr(Box<Expr>),
     PostfixIncr(Box<Expr>), PostfixDecr(Box<Expr>),
     Addr(Box<Expr>), Not(Box<Expr>),
     Neg(Box<Expr>), Pos(Box<Expr>),
     // Op { op, lhs, rhs } represents lhs op rhs
     Op { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr> },
-    SizeOf(Box<Expr>),
+    SizeOf(Box<Type>),
 }
 
 pub enum Instr {
     /// ;
     EmptyInstr,
     /// expr;
-    ExprInstr,
+    ExprInstr(Expr),
     /// if (cond) then_branch (else else_branch)?
     If {
         cond: Expr,
