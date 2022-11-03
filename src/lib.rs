@@ -8,8 +8,13 @@ pub mod error;
 mod parsing;
 
 pub fn parse(p: impl AsRef<Path>) -> Result<()> {
-    parse_to_ast(p.as_ref()).unwrap();
-    Ok(())
+    match parse_to_ast(p.as_ref()) {
+	Ok(_) => Ok(()),
+	Err(error) => {
+	    eprintln!("{}", error);
+	    std::process::exit(1);
+	},
+    }
 }
 
 pub fn typecheck(_p: impl AsRef<Path>, _: ()) -> Result<()> {

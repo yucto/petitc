@@ -389,6 +389,7 @@ version = "0.1.0"
 dependencies = [
  "beans",
  "clap",
+ "thiserror",
 ]
 
 [[package]]

@@ -13,15 +13,12 @@ pub(crate) fn parse_to_ast(source: &Path) -> Result<File> {
     let (lexer, parser) = include_parser!(
     lexer => compiled "../gmrs/petitc.clx",
     parser => compiled "../gmrs/petitc.cgr",
-    )
-    .unwrap()
+    )?
     .unpack_into(&mut warnings);
-    let mut input = StringStream::from_file(source)
-        .unwrap()
+    let mut input = StringStream::from_file(source)?
         .unpack_into(&mut warnings);
     let _ast = parser
-        .parse(&mut lexer.lex(&mut input))
-        .unwrap_or_else(|_| std::process::exit(1))
+        .parse(&mut lexer.lex(&mut input))?
         .unpack_into(&mut warnings);
     std::process::exit(0);
 }
