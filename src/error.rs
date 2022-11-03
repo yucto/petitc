@@ -14,9 +14,9 @@ fn display_span(span: &Span, f: &mut fmt::Formatter) -> fmt::Result {
     if start_line == end_line {
         write!(f, "line {}, ", start_line + 1)?;
         if end_column - start_column <= 1 {
-            write!(f, "character {}", start_column+1)?;
+            write!(f, "character {}", start_column + 1)?;
         } else {
-            write!(f, "characters {}-{},", start_column+1, end_column)?;
+            write!(f, "characters {}-{},", start_column + 1, end_column)?;
         }
     } else {
         write!(
@@ -24,7 +24,7 @@ fn display_span(span: &Span, f: &mut fmt::Formatter) -> fmt::Result {
             "lines {}-{}, characters {}-{}",
             start_line + 1,
             end_line + 1,
-            start_column+1,
+            start_column + 1,
             end_column
         )?;
     }
@@ -39,11 +39,11 @@ impl fmt::Display for Error {
                 display_span(span, f)?;
                 writeln!(f, "Syntax error: {}", message)
             }
-	    Self::Beans(BeansError::LexingError { message, location }) => {
-		let span = location.get();
-		display_span(&span, f)?;
-		writeln!(f, "Lexing error: {}", message)
-	    }
+            Self::Beans(BeansError::LexingError { message, location }) => {
+                let span = location.get();
+                display_span(&span, f)?;
+                writeln!(f, "Lexing error: {}", message)
+            }
             Self::Beans(other) => {
                 write!(
                     f,

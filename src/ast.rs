@@ -1,20 +1,99 @@
-#[allow(dead_code)]
 pub struct File {
     pub fun_decls: Vec<FunDecl>,
 }
 
+pub type Ident = usize;
+
 pub struct FunDecl {
     pub ty: Type,
-    pub name: String,
-    pub params: Vec<(Type, String)>,
+    pub name: Ident,
+    pub params: Vec<(Type, Ident)>,
     pub code: Vec<DeclOrInstr>,
 }
 
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub struct Type {
     pub basis: BasisType,
     pub indirection_count: usize,
 }
 
+impl Type {
+    pub const fn ptr(self) -> Type {
+        Type {
+            indirection_count: self.indirection_count + 1,
+            ..self
+        }
+    }
+
+    pub const fn is_ptr(&self) -> bool {
+        self.indirection_count > 0
+    }
+
+    pub const VOID: Type = Type {
+        basis: BasisType::Void,
+        indirection_count: 0,
+    };
+
+    pub const INT: Type = Type {
+        basis: BasisType::Void,
+        indirection_count: 0,
+    };
+
+    pub const BOOL: Type = Type {
+        basis: BasisType::Void,
+        indirection_count: 0,
+    };
+
+    pub const VOID_PTR: Type = Type::VOID.ptr();
+
+    pub fn is_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Type {
+                    basis: basis1,
+                    indirection_count: cnt1,
+                },
+                Type {
+                    basis: basis2,
+                    indirection_count: cnt2,
+                },
+            ) if basis1 == basis2 && cnt1 == cnt2 => true,
+            (
+                Type {
+                    basis: BasisType::Bool | BasisType::Int,
+                    indirection_count: 0,
+                },
+                Type {
+                    basis: BasisType::Bool | BasisType::Int,
+                    indirection_count: 0,
+                },
+            ) => true,
+            (
+                Type {
+                    indirection_count: cnt1,
+                    ..
+                },
+                Type {
+                    basis,
+                    indirection_count: cnt2,
+                },
+            )
+            | (
+                Type {
+                    basis,
+                    indirection_count: cnt1,
+                },
+                Type {
+                    indirection_count: cnt2,
+                    ..
+                },
+            ) if *basis == BasisType::Void && *cnt1 > 0 && *cnt2 > 0 => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub enum BasisType {
     Void,
     Int,
@@ -29,7 +108,7 @@ pub enum DeclOrInstr {
 
 pub struct VarDecl {
     pub ty: Type,
-    pub name: String,
+    pub name: Ident,
     pub value: Option<Expr>,
 }
 
@@ -44,20 +123,27 @@ pub enum BinOp {
 #[rustfmt::skip]
 pub enum Expr {
     Int(i64), True, False, Null,
-    Ident(String),
+    Ident(Ident),
     Deref(Box<Expr>),
-    // Index { lhs, rhs } represents lhs[rhs]
-    Index { lsh: Box<Expr>, rhs: Box<Expr> },
-    // Assign { lsh, rhs } represents lhs = rhs
-    Assign { lsh: Box<Expr>, rhs: Box<Expr> },
-    Call { name: String, args: Vec<Expr> },
+    // Assign { lhs, rhs } represents lhs = rhs
+    Assign { lhs: Box<Expr>, rhs: Box<Expr> },
+    Call { name: Ident, args: Vec<Expr> },
     PrefixIncr(Box<Expr>), PrefixDecr(Box<Expr>),
     PostfixIncr(Box<Expr>), PostfixDecr(Box<Expr>),
     Addr(Box<Expr>), Not(Box<Expr>),
     Neg(Box<Expr>), Pos(Box<Expr>),
     // Op { op, lhs, rhs } represents lhs op rhs
     Op { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr> },
-    SizeOf(Box<Type>),
+    SizeOf(Type),
+}
+
+impl Expr {
+    pub const fn is_lvalue(&self) -> bool {
+        match self {
+            Expr::Ident(_) | Expr::Deref(_) => true,
+            _ => false,
+        }
+    }
 }
 
 pub enum Instr {

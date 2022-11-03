@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use parsing::parse_to_ast;
 use error::Result;
+use parsing::parse_to_ast;
 
 pub mod ast;
 pub mod error;
@@ -9,11 +9,11 @@ mod parsing;
 
 pub fn parse(p: impl AsRef<Path>) -> Result<()> {
     match parse_to_ast(p.as_ref()) {
-	Ok(_) => Ok(()),
-	Err(error) => {
-	    eprintln!("{}", error);
-	    std::process::exit(1);
-	},
+        Ok(_) => Ok(()),
+        Err(error) => {
+            eprintln!("{}", error);
+            std::process::exit(1);
+        }
     }
 }
 
