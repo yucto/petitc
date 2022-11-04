@@ -2,15 +2,42 @@
 /// which should be passed along with the AST
 pub type Ident = usize;
 
-pub struct File {
-    pub fun_decls: Vec<FunDecl>,
+/// Annotate the AST
+pub trait Annotation {
+    type Ident;
+    type Type;
+    type WrapExpr<T>;
+    type WrapInstr<T>;
+    type WrapFunDecl<T>;
+    type WrapVarDecl<T>;
 }
 
-pub struct FunDecl {
-    pub ty: Type,
-    pub name: Ident,
-    pub params: Vec<(Type, Ident)>,
-    pub code: Vec<DeclOrInstr>,
+/// For developing purpose
+/// All bounds = DummyAnnotation shall
+/// be replaced by a SpanAnnotation later
+pub struct DummyAnnotation;
+
+impl Annotation for DummyAnnotation {
+    type Ident = Ident;
+    type Type = Type;
+    type WrapExpr<T> = T;
+    type WrapInstr<T> = T;
+    type WrapFunDecl<T> = T;
+    type WrapVarDecl<T> = T;
+}
+
+pub struct File<A: Annotation = DummyAnnotation> {
+    pub fun_decls: Vec<A::WrapFunDecl<FunDecl<A>>>,
+}
+
+pub struct FunDecl<A: Annotation = DummyAnnotation> {
+    pub ty: A::Type,
+    pub name: A::Ident,
+    pub params: Vec<(A::Type, A::Ident)>,
+    /// Behave like an Instr::Block
+    pub code: A::WrapInstr<Vec<DeclOrInstr<A>>>,
+    /// Store wether it is declared at the toplevel or not
+    pub toplevel: bool,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -102,16 +129,16 @@ pub enum BasisType {
     Bool,
 }
 
-pub enum DeclOrInstr {
-    Fun(FunDecl),
-    Var(VarDecl),
-    Instr(Instr),
+pub enum DeclOrInstr<A: Annotation = DummyAnnotation> {
+    Fun(A::WrapFunDecl<FunDecl<A>>),
+    Var(A::WrapVarDecl<VarDecl<A>>),
+    Instr(A::WrapInstr<Instr<A>>),
 }
 
-pub struct VarDecl {
-    pub ty: Type,
-    pub name: Ident,
-    pub value: Option<Expr>,
+pub struct VarDecl<A: Annotation = DummyAnnotation> {
+    pub ty: A::Type,
+    pub name: A::Ident,
+    pub value: Option<A::WrapExpr<Expr<A>>>,
 }
 
 #[rustfmt::skip]
@@ -123,23 +150,23 @@ pub enum BinOp {
 }
 
 #[rustfmt::skip]
-pub enum Expr {
+pub enum Expr<A: Annotation = DummyAnnotation> {
     Int(i64), True, False, Null,
     Ident(Ident),
-    Deref(Box<Expr>),
+    Deref(Box<A::WrapExpr<Expr<A>>>),
     // Assign { lhs, rhs } represents lhs = rhs
-    Assign { lhs: Box<Expr>, rhs: Box<Expr> },
-    Call { name: Ident, args: Vec<Expr> },
-    PrefixIncr(Box<Expr>), PrefixDecr(Box<Expr>),
-    PostfixIncr(Box<Expr>), PostfixDecr(Box<Expr>),
-    Addr(Box<Expr>), Not(Box<Expr>),
-    Neg(Box<Expr>), Pos(Box<Expr>),
+    Assign { lhs: Box<A::WrapExpr<Expr<A>>>, rhs: Box<A::WrapExpr<Expr<A>>> },
+    Call { name: Ident, args: Vec<A::WrapExpr<Expr<A>>> },
+    PrefixIncr(Box<A::WrapExpr<Expr<A>>>), PrefixDecr(Box<A::WrapExpr<Expr<A>>>),
+    PostfixIncr(Box<A::WrapExpr<Expr<A>>>), PostfixDecr(Box<A::WrapExpr<Expr<A>>>),
+    Addr(Box<A::WrapExpr<Expr<A>>>), Not(Box<A::WrapExpr<Expr<A>>>),
+    Neg(Box<A::WrapExpr<Expr<A>>>), Pos(Box<A::WrapExpr<Expr<A>>>),
     // Op { op, lhs, rhs } represents lhs op rhs
-    Op { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr> },
+    Op { op: BinOp, lhs: Box<A::WrapExpr<Expr<A>>>, rhs: Box<A::WrapExpr<Expr<A>>> },
     SizeOf(Type),
 }
 
-impl Expr {
+impl<A: Annotation> Expr<A> {
     pub const fn is_lvalue(&self) -> bool {
         match self {
             Expr::Ident(_) | Expr::Deref(_) => true,
@@ -148,30 +175,33 @@ impl Expr {
     }
 }
 
-pub enum Instr {
+pub enum Instr<A: Annotation = DummyAnnotation> {
     /// ;
     EmptyInstr,
     /// expr;
-    ExprInstr(Expr),
+    ExprInstr(A::WrapExpr<Expr<A>>),
     /// if (cond) then_branch (else else_branch)?
     If {
-        cond: Expr,
-        then_branch: Box<Instr>,
-        else_branch: Option<Box<Instr>>,
+        cond: A::WrapExpr<Expr<A>>,
+        then_branch: Box<A::WrapInstr<Instr<A>>>,
+        else_branch: Option<Box<A::WrapInstr<Instr<A>>>>,
     },
     /// while (cond) body
-    While { cond: Expr, body: Box<Instr> },
+    While {
+        cond: A::WrapExpr<Expr<A>>,
+        body: Box<A::WrapInstr<Instr<A>>>,
+    },
     /// for (loop_var; cond; incr) body
     For {
-        loop_var: Option<VarDecl>,
-        cond: Option<Expr>,
-        incr: Vec<Expr>,
-        body: Box<Instr>,
+        loop_var: Option<A::WrapVarDecl<VarDecl<A>>>,
+        cond: Option<A::WrapExpr<Expr<A>>>,
+        incr: Vec<A::WrapExpr<Expr<A>>>,
+        body: Box<A::WrapInstr<Instr<A>>>,
     },
     /// { body }
-    Block(Vec<DeclOrInstr>),
+    Block(Vec<DeclOrInstr<A>>),
     /// return (expr)?;
-    Return(Option<Expr>),
+    Return(Option<A::WrapExpr<Expr<A>>>),
     /// break;
     Break,
     /// continue;

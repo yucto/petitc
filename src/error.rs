@@ -5,6 +5,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum Error {
     Beans(#[from] BeansError),
+    TypeError,
 }
 
 fn display_span(span: &Span, f: &mut fmt::Formatter) -> fmt::Result {
@@ -50,6 +51,9 @@ impl fmt::Display for Error {
                     "The parsing engine encountered an internal error:\n{}",
                     other
                 )
+            }
+            Self::TypeError => {
+                unimplemented!()
             }
         }
     }
