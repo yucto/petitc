@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::Path};
 
 use crate::ast::{
-    BinOp, DeclOrInstr, Expr, File, FunDecl, Instr, Type, VarDecl,
+    BinOp, DeclOrInstr, Expr, File, FunDecl, Ident, Instr, Type, VarDecl,
 };
 
 use crate::error::Result;
@@ -191,215 +191,127 @@ fn read_bool(ast: AST) -> Expr {
     }}
 }
 
-fn read_literal_expr(
-    ast: AST,
-    string_store: &mut Vec<String>,
-    string_assoc: &mut HashMap<String, usize>,
-) -> Expr {
+fn read_op(ast: AST) -> BinOp {
+    use BinOp::*;
     let mut node = node!(ast);
-    match_variant! {(node) {
-    "Int" => read_int(get!(node, "value")),
-    "Bool" => read_bool(get!(node, "value")),
-    "Null" => Expr::Null,
-    "Through" => read_expr(get!(node, "this"),string_store, string_assoc),
-    }}
-}
-
-fn read_unary_expr(
-    ast: AST,
-    string_store: &mut Vec<String>,
-    string_assoc: &mut HashMap<String, usize>,
-) -> Expr {
-    let mut node = node!(ast);
-    match_variant! {(node) {
-    "Not" => Expr::Not(Box::new(read_unary_expr(get!(node, "value"),string_store, string_assoc))),
-    "Incrl" => Expr::PrefixIncr(Box::new(read_unary_expr(get!(node, "value"),string_store, string_assoc))),
-    "Incrr" => Expr::PostfixIncr(Box::new(read_unary_expr(get!(node, "value"),string_store, string_assoc))),
-    "Decrl" => Expr::PrefixDecr(Box::new(read_unary_expr(get!(node, "value"),string_store, string_assoc))),
-    "Decrr" => Expr::PostfixDecr(Box::new(read_unary_expr(get!(node, "value"),string_store, string_assoc))),
-    "Borrow" => Expr::Addr(Box::new(read_unary_expr(get!(node, "value"),string_store, string_assoc))),
-    "Deref" => Expr::Deref(Box::new(read_unary_expr(get!(node, "value"),string_store, string_assoc))),
-    "Plus" => Expr::Pos(Box::new(read_unary_expr(get!(node, "value"),string_store, string_assoc))),
-    "Minus" => Expr::Neg(Box::new(read_unary_expr(get!(node, "value"),string_store, string_assoc))),
-    "Ident" => Expr::Ident(read_ident(value!(node, "value").to_string(), string_store, string_assoc)),
-    "Sizeof" => Expr::SizeOf(read_type(get!(node, "type"))),
-    "Call" => Expr::Call {
-            name: read_ident(value!(node, "name").to_string(), string_store, string_assoc),
-            args: read_list(read_expr, get!(node, "args"), string_store, string_assoc),
-    },
-    "Index" => Expr::Deref(Box::new(Expr::Op {
-        op: BinOp::Add,
-        lhs: Box::new(read_unary_expr(get!(node, "array"), string_store, string_assoc)),
-        rhs: Box::new(read_expr(get!(node, "index"), string_store, string_assoc)),
-    })),
-    "Through" => read_literal_expr(get!(node, "this"), string_store, string_assoc),
-    }}
-}
-
-fn read_mdm_expr(
-    ast: AST,
-    string_store: &mut Vec<String>,
-    string_assoc: &mut HashMap<String, usize>,
-) -> Expr {
-    let mut node = node!(ast);
-    match_variant! {(node) {
-    "Mul" => Expr::Op {
-        op: BinOp::Mul,
-        lhs: Box::new(read_unary_expr(get!(node, "left"), string_store, string_assoc)),
-        rhs: Box::new(read_mdm_expr(get!(node, "right"), string_store, string_assoc)),
-    },
-    "Div" => Expr::Op {
-        op: BinOp::Div,
-        lhs: Box::new(read_unary_expr(get!(node, "left"), string_store, string_assoc)),
-        rhs: Box::new(read_mdm_expr(get!(node, "right"), string_store, string_assoc)),
-    },
-    "Mod" => Expr::Op {
-        op: BinOp::Mod,
-        lhs: Box::new(read_unary_expr(get!(node, "left"), string_store, string_assoc)),
-        rhs: Box::new(read_mdm_expr(get!(node, "right"), string_store, string_assoc)),
-    },
-    "Through" => read_unary_expr(get!(node, "this"), string_store, string_assoc),
-    }}
-}
-
-fn read_pm_expr(
-    ast: AST,
-    string_store: &mut Vec<String>,
-    string_assoc: &mut HashMap<String, usize>,
-) -> Expr {
-    let mut node = node!(ast);
-    match_variant! {(node) {
-    "Add" => Expr::Op {
-        op: BinOp::Add,
-        lhs: Box::new(read_mdm_expr(get!(node, "left"), string_store, string_assoc)),
-        rhs: Box::new(read_pm_expr(get!(node, "right"), string_store, string_assoc)),
-    },
-    "Sub" => Expr::Op {
-        op: BinOp::Sub,
-        lhs: Box::new(read_mdm_expr(get!(node, "left"), string_store, string_assoc)),
-        rhs: Box::new(read_pm_expr(get!(node, "right"), string_store, string_assoc)),
-    },
-    "Through" => read_mdm_expr(get!(node, "this"), string_store, string_assoc),
-    }}
-}
-
-fn read_cmp_expr(
-    ast: AST,
-    string_store: &mut Vec<String>,
-    string_assoc: &mut HashMap<String, usize>,
-) -> Expr {
-    let mut node = node!(ast);
-    match_variant! {(node) {
-    "Lt" => Expr::Op {
-        op: BinOp::Lt,
-        lhs: Box::new(read_pm_expr(get!(node, "left"), string_store, string_assoc)),
-        rhs: Box::new(read_cmp_expr(get!(node, "right"), string_store, string_assoc)),
-    },
-    "Gt" => Expr::Op {
-        op: BinOp::Gt,
-        lhs: Box::new(read_pm_expr(get!(node, "left"), string_store, string_assoc)),
-        rhs: Box::new(read_cmp_expr(get!(node, "right"), string_store, string_assoc)),
-    },
-    "Geq" => Expr::Op {
-        op: BinOp::Ge,
-        lhs: Box::new(read_pm_expr(get!(node, "left"), string_store, string_assoc)),
-        rhs: Box::new(read_cmp_expr(get!(node, "right"), string_store, string_assoc)),
-    },
-    "Leq" => Expr::Op {
-        op: BinOp::Le,
-        lhs: Box::new(read_pm_expr(get!(node, "left"), string_store, string_assoc)),
-        rhs: Box::new(read_cmp_expr(get!(node, "right"), string_store, string_assoc)),
-    },
-    "Through" => read_pm_expr(get!(node, "this"), string_store, string_assoc),
-    }}
-}
-
-fn read_eq_expr(
-    ast: AST,
-    string_store: &mut Vec<String>,
-    string_assoc: &mut HashMap<String, usize>,
-) -> Expr {
-    let mut node = node!(ast);
-    match_variant! {(node) {
-    "Equal" => Expr::Op {
-        op: BinOp::Eq,
-        lhs: Box::new(read_cmp_expr(get!(node, "left"), string_store, string_assoc)),
-        rhs: Box::new(read_eq_expr(get!(node, "right"), string_store, string_assoc)),
-    },
-    "NotEqual" => Expr::Op {
-        op: BinOp::NEq,
-        lhs: Box::new(read_cmp_expr(get!(node, "left"), string_store, string_assoc)),
-        rhs: Box::new(read_eq_expr(get!(node, "right"), string_store, string_assoc)),
-    },
-    "Through" => read_cmp_expr(get!(node, "this"), string_store, string_assoc),
-    }}
-}
-
-fn read_and_expr(
-    ast: AST,
-    string_store: &mut Vec<String>,
-    string_assoc: &mut HashMap<String, usize>,
-) -> Expr {
-    let mut node = node!(ast);
-    match_variant! {(node) {
-    "And" => Expr::Op {
-        op: BinOp::BAnd,
-        lhs: Box::new(read_eq_expr(get!(node, "left"), string_store, string_assoc)),
-        rhs: Box::new(read_and_expr(get!(node, "right"), string_store, string_assoc)),
-    },
-    "Through" => read_eq_expr(get!(node, "this"), string_store, string_assoc),
-    }}
-}
-
-fn read_or_expr(
-    ast: AST,
-    string_store: &mut Vec<String>,
-    string_assoc: &mut HashMap<String, usize>,
-) -> Expr {
-    let mut node = node!(ast);
-    match_variant! {(node) {
-    "Or" => Expr::Op {
-            op: BinOp::BOr,
-            lhs: Box::new(read_and_expr(get!(node, "left"), string_store, string_assoc)),
-            rhs: Box::new(read_or_expr(get!(node, "right"), string_store, string_assoc)),
-    },
-    "Through" => read_and_expr(get!(node, "this"), string_store, string_assoc),
-    }}
-}
-
-fn read_equal_expr(
-    ast: AST,
-    string_store: &mut Vec<String>,
-    string_assoc: &mut HashMap<String, usize>,
-) -> Expr {
-    let mut node = node!(ast);
-    match_variant! {(node) {
-    "Assign" => Expr::Assign {
-        lhs: Box::new(read_or_expr(
-                get!(node, "key"), string_store, string_assoc
-            )),
-            rhs: Box::new(read_equal_expr(
-                get!(node, "value"), string_store, string_assoc
-            )),
-    },
-    "Through" => read_or_expr(get!(node, "this"), string_store, string_assoc),
+    match_variant!{(node) {
+	"Mul" => Mul,
+	"Div" => Div,
+	"Mod" => Mod,
+	"Add" => Add,
+	"Sub" => Sub,
+	"Lt" => Lt,
+	"Gt" => Gt,
+	"Geq" => Ge,
+	"Leq" => Le,
+	"Equal" => Eq,
+	"NotEqual" => NEq,
+	"And" => BAnd,
+	"Or" => BOr,
     }}
 }
 
 fn read_expr(
     ast: AST,
     string_store: &mut Vec<String>,
-    string_assoc: &mut HashMap<String, usize>,
+    string_assoc: &mut HashMap<String, Ident>,
 ) -> Expr {
-    if let AST::Node { mut attributes, .. } = ast {
-        read_equal_expr(
-            attributes.remove("this").unwrap(),
-            string_store,
-            string_assoc,
-        )
-    } else {
-        panic!();
-    }
+    let mut node = node!(ast);
+    match_variant! {(node) {
+	"Int" => read_int(get!(node, "value")),
+	"Bool" => read_bool(get!(node, "value")),
+	"Null" => Expr::Null,
+	"Through" => read_expr(get!(node, "this"), string_store, string_assoc),
+	"Not" => Expr::Not(Box::new(read_expr(
+	    get!(node, "value"),
+	    string_store,
+	    string_assoc,
+	))),
+	"Incrl" => Expr::PrefixIncr(Box::new(read_expr(
+	    get!(node, "value"),
+	    string_store,
+	    string_assoc,
+	))),
+	"Incrr" => Expr::PostfixIncr(Box::new(read_expr(
+	    get!(node, "value"),
+	    string_store,
+	    string_assoc,
+	))),
+	"Decrl" => Expr::PrefixDecr(Box::new(read_expr(
+	    get!(node, "value"),
+	    string_store,
+	    string_assoc,
+	))),
+	"Decrr" => Expr::PostfixDecr(Box::new(read_expr(
+	    get!(node, "value"),
+	    string_store,
+	    string_assoc,
+	))),
+	"Borrow" => Expr::Addr(Box::new(read_expr(
+	    get!(node, "value"),
+	    string_store,
+	    string_assoc,
+	))),
+	"Deref" => Expr::Deref(Box::new(read_expr(
+	    get!(node, "value"),
+	    string_store,
+	    string_assoc,
+	))),
+	"Plus" => Expr::Pos(Box::new(read_expr(
+	    get!(node, "value"),
+	    string_store,
+	    string_assoc,
+	))),
+	"Minus" => Expr::Neg(Box::new(read_expr(
+	    get!(node, "value"),
+	    string_store,
+	    string_assoc,
+	))),
+	"Ident" => Expr::Ident(read_ident(
+	    value!(node, "value").to_string(),
+	    string_store,
+	    string_assoc,
+	)),
+	"Sizeof" => Expr::SizeOf(read_type(get!(node, "type"))),
+	"Call" => Expr::Call {
+	    name: read_ident(
+		value!(node, "name").to_string(),
+		string_store,
+		string_assoc,
+	    ),
+	    args: read_list(
+		read_expr,
+		get!(node, "args"),
+		string_store,
+		string_assoc,
+	    ),
+	},
+	"BinOp" => Expr::Op {
+	    op: read_op(get!(node, "op")),
+	    lhs: Box::new(read_expr(
+		get!(node, "left"),
+		string_store,
+		string_assoc,
+	    )),
+	    rhs: Box::new(read_expr(
+		get!(node, "right"),
+		string_store,
+		string_assoc,
+	    )),
+	},
+	"Assign" => Expr::Assign {
+	    lhs: Box::new(read_expr(
+		get!(node, "key"),
+		string_store,
+		string_assoc,
+	    )),
+	    rhs: Box::new(read_expr(
+		get!(node, "value"),
+		string_store,
+		string_assoc,
+	    )),
+	},
+    }}
 }
 
 fn read_definition(
