@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::{collections::HashMap, path::Path};
 
 use crate::ast::{
@@ -7,6 +8,7 @@ use crate::ast::{
 use crate::error::Result;
 use beans::error::WarningSet;
 use beans::include_parser;
+use beans::location::Span;
 use beans::parser::{Parser, Value, AST};
 use beans::stream::StringStream;
 
@@ -25,7 +27,7 @@ macro_rules! error {
 
 macro_rules! get {
     ($node:expr, $key:literal) => {
-        $node.remove($key).unwrap_or_else(|| {
+        $node.attributes.remove($key).unwrap_or_else(|| {
             error!("expected to find child {}, got\n{:?}", $key, $node)
         })
     };
@@ -33,8 +35,11 @@ macro_rules! get {
 
 macro_rules! node {
     ($node:expr) => {
-        if let AST::Node { attributes, .. } = $node {
-            attributes
+        if let AST::Node { attributes, span, .. } = $node {
+            AstNode {
+		attributes,
+		span,
+	    }
         } else {
             error!("expected to find node");
         }
@@ -61,6 +66,12 @@ macro_rules! match_variant {
 	    found_variant => error!("Unexpected variant {}", found_variant),
 	}
     };
+}
+
+#[derive(Debug)]
+struct AstNode {
+    attributes: HashMap<Rc<str>, AST>,
+    span: Span,
 }
 
 fn read_ident(
