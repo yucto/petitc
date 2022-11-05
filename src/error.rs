@@ -5,8 +5,19 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum Error {
     Beans(#[from] BeansError),
-    TypeError,
+    TypeError(String),
+    NoMainFunction,
+    IncorrectMainFunctionType {
+        ty: crate::ast::Type,
+        params: Vec<crate::ast::Type>,
+    },
+    BreakContinueOutsideLoop,
+    // TODO : Should hold the variable name
+    NameError,
 }
+
+#[derive(Debug, Error)]
+pub enum TypeError {}
 
 fn display_span(span: &Span, f: &mut fmt::Formatter) -> fmt::Result {
     let (start_line, start_column) = span.start();
@@ -52,8 +63,25 @@ impl fmt::Display for Error {
                     other
                 )
             }
-            Self::TypeError => {
-                unimplemented!()
+            Self::TypeError(message) => {
+                writeln!(f, "Typing error: {}", message)
+            }
+            Self::NoMainFunction => {
+                writeln!(f, "No main function")
+            }
+            Self::IncorrectMainFunctionType { ty, params } => {
+                writeln!(
+                    f,
+                    "The signature of the main function should be int(), not {}({})",
+                    ty,
+                    params.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+                )
+            }
+            Self::BreakContinueOutsideLoop => {
+                writeln!(f, "break or continue statement outside of a loop")
+            }
+            Self::NameError => {
+                writeln!(f, "unknown variable")
             }
         }
     }

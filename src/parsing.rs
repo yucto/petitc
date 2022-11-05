@@ -3,8 +3,8 @@ use std::{collections::HashMap, path::Path};
 use crate::ast::{
     BinOp, DeclOrInstr, Expr, File, FunDecl, Ident, Instr, Type, VarDecl,
 };
-
 use crate::error::Result;
+
 use beans::error::WarningSet;
 use beans::include_parser;
 use beans::parser::{Parser, Value, AST};
@@ -70,7 +70,7 @@ fn read_ident(
 ) -> usize {
     *string_assoc.entry(ident.clone()).or_insert_with(|| {
         string_store.push(ident);
-        string_store.len()
+        string_store.len() - 1
     })
 }
 
@@ -155,15 +155,15 @@ fn read_statement(
     "If" => Instr::If {
         cond: read_expr(get!(node, "condition"), toplevel, string_store, string_assoc),
         then_branch: Box::new(read_statement(get!(node, "then"), toplevel, string_store, string_assoc)),
-        else_branch: read_option(
+        else_branch: Box::new(read_option(
             |ast, toplevel, string_store, string_assoc| {
-                Box::new(read_else(ast, toplevel, string_store, string_assoc))
+                read_else(ast, toplevel, string_store, string_assoc)
             },
             get!(node, "else"),
             toplevel,
             string_store,
             string_assoc
-        ),
+        ).unwrap_or(Instr::EmptyInstr)),
     },
     "While" => Instr::While {
         cond: read_expr(get!(node, "condition"), toplevel, string_store, string_assoc),
@@ -483,7 +483,7 @@ fn read_file(ast: AST) -> (File, Vec<String>) {
                 &mut string_assoc,
             ),
         },
-        Vec::new(),
+        string_store,
     )
 }
 

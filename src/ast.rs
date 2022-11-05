@@ -40,7 +40,7 @@ pub struct FunDecl<A: Annotation = DummyAnnotation> {
     pub toplevel: bool,
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Type {
     pub basis: BasisType,
     pub indirection_count: usize,
@@ -64,12 +64,12 @@ impl Type {
     };
 
     pub const INT: Type = Type {
-        basis: BasisType::Void,
+        basis: BasisType::Int,
         indirection_count: 0,
     };
 
     pub const BOOL: Type = Type {
-        basis: BasisType::Void,
+        basis: BasisType::Bool,
         indirection_count: 0,
     };
 
@@ -122,7 +122,21 @@ impl Type {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.basis {
+            BasisType::Int => write!(f, "int")?,
+            BasisType::Bool => write!(f, "bool")?,
+            BasisType::Void => write!(f, "void")?,
+        }
+        for _ in 0..self.indirection_count {
+            write!(f, "*")?;
+        }
+        write!(f, "")
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum BasisType {
     Void,
     Int,
@@ -142,6 +156,7 @@ pub struct VarDecl<A: Annotation = DummyAnnotation> {
 }
 
 #[rustfmt::skip]
+#[derive(Clone, Copy)]
 pub enum BinOp {
     Eq, NEq,
     Lt, Le, Gt, Ge,
@@ -180,11 +195,12 @@ pub enum Instr<A: Annotation = DummyAnnotation> {
     EmptyInstr,
     /// expr;
     ExprInstr(A::WrapExpr<Expr<A>>),
-    /// if (cond) then_branch (else else_branch)?
+    /// if (cond) then_branch else else_branch
     If {
         cond: A::WrapExpr<Expr<A>>,
         then_branch: Box<A::WrapInstr<Instr<A>>>,
-        else_branch: Option<Box<A::WrapInstr<Instr<A>>>>,
+        /// Default to EmptyInstr if not present
+        else_branch: Box<A::WrapInstr<Instr<A>>>,
     },
     /// while (cond) body
     While {
