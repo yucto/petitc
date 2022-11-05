@@ -7,9 +7,9 @@ use std::collections::HashMap;
 
 pub struct TypeAnnotion;
 pub struct TypedInstr<T> {
-    instr: T,
-    loop_level: usize,
-    expected_return_type: ast::Type,
+    pub instr: T,
+    pub loop_level: usize,
+    pub expected_return_type: ast::Type,
 }
 
 impl ast::Annotation for TypeAnnotion {
@@ -24,20 +24,47 @@ impl ast::Annotation for TypeAnnotion {
 pub type TypedExpr =
     <TypeAnnotion as ast::Annotation>::WrapExpr<ast::Expr<TypeAnnotion>>;
 
+enum Binding {
+    Var(ast::Type),
+    Fun((ast::Type, Vec<ast::Type>)),
+}
+
+fn get_fun(
+    env: &HashMap<ast::Ident, Binding>,
+    name: ast::Ident,
+) -> Result<&(ast::Type, Vec<ast::Type>)> {
+    if let Some(Binding::Fun(res)) = env.get(&name) {
+        Ok(res)
+    } else {
+        // TODO : no function named name in current scope
+        Err(Error::NameError)
+    }
+}
+
+fn get_var(
+    env: &HashMap<ast::Ident, Binding>,
+    name: ast::Ident,
+) -> Result<ast::Type> {
+    if let Some(Binding::Var(res)) = env.get(&name) {
+        Ok(*res)
+    } else {
+        // TODO : no variable named name in current scope
+        Err(Error::NameError)
+    }
+}
+
 fn type_expr(
     e: ast::Expr,
-    var_env: &HashMap<usize, ast::Type>,
-    fun_env: &HashMap<usize, (Vec<ast::Type>, ast::Type)>,
+    env: &HashMap<ast::Ident, Binding>,
 ) -> Result<TypedExpr> {
     match e {
         ast::Expr::True => Ok((ast::Expr::True, ast::Type::BOOL)),
         ast::Expr::False => Ok((ast::Expr::False, ast::Type::BOOL)),
         ast::Expr::Null => Ok((ast::Expr::Null, ast::Type::VOID_PTR)),
         ast::Expr::Int(n) => Ok((ast::Expr::Int(n), ast::Type::INT)),
-        ast::Expr::Ident(name) => Ok((
-            ast::Expr::Ident(name),
-            var_env.get(&name).cloned().ok_or(Error::NameError)?,
-        )),
+        ast::Expr::Ident(name) => {
+            Ok((ast::Expr::Ident(name), get_var(env, name)?))
+        }
         ast::Expr::SizeOf(ty) => {
             if !ty.is_eq(&ast::Type::VOID) {
                 Ok((ast::Expr::SizeOf(ty), ast::Type::INT))
@@ -47,7 +74,7 @@ fn type_expr(
         }
         ast::Expr::Addr(e) => {
             if e.is_lvalue() {
-                type_expr(*e, var_env, fun_env).map(|(e, ty)| {
+                type_expr(*e, env).map(|(e, ty)| {
                     (ast::Expr::Addr(Box::new((e, ty))), ty.ptr())
                 })
             } else {
@@ -57,7 +84,7 @@ fn type_expr(
             }
         }
         ast::Expr::Deref(e) => {
-            type_expr(*e, var_env, fun_env).and_then(|inner_e @ (_, mut ty)| {
+            type_expr(*e, env).and_then(|inner_e @ (_, mut ty)| {
                 if ty.is_ptr() {
                     ty.indirection_count -= 1;
                     Ok((ast::Expr::Deref(Box::new(inner_e)), ty))
@@ -73,8 +100,8 @@ fn type_expr(
             if !lhs.is_lvalue() {
                 return Err(Error::TypeError("Can't assign to rvalue".into()));
             }
-            let lhs @ (_, ty1) = type_expr(*lhs, var_env, fun_env)?;
-            let rhs @ (_, ty2) = type_expr(*rhs, var_env, fun_env)?;
+            let lhs @ (_, ty1) = type_expr(*lhs, env)?;
+            let rhs @ (_, ty2) = type_expr(*rhs, env)?;
 
             if !ty1.is_eq(&ty2) {
                 return Err(Error::TypeError(format!(
@@ -93,7 +120,7 @@ fn type_expr(
         }
         ast::Expr::PrefixIncr(e) => {
             if e.is_lvalue() {
-                let e @ (_, ty) = type_expr(*e, var_env, fun_env)?;
+                let e @ (_, ty) = type_expr(*e, env)?;
                 Ok((ast::Expr::PrefixIncr(Box::new(e)), ty))
             } else {
                 Err(Error::TypeError(
@@ -104,7 +131,7 @@ fn type_expr(
         // The code here should be the same of the one at the previous branch
         ast::Expr::PrefixDecr(e) => {
             if e.is_lvalue() {
-                let e @ (_, ty) = type_expr(*e, var_env, fun_env)?;
+                let e @ (_, ty) = type_expr(*e, env)?;
                 Ok((ast::Expr::PrefixDecr(Box::new(e)), ty))
             } else {
                 Err(Error::TypeError(
@@ -115,7 +142,7 @@ fn type_expr(
         // The code here should be the same of the one at the previous branch
         ast::Expr::PostfixIncr(e) => {
             if e.is_lvalue() {
-                let e @ (_, ty) = type_expr(*e, var_env, fun_env)?;
+                let e @ (_, ty) = type_expr(*e, env)?;
                 Ok((ast::Expr::PostfixIncr(Box::new(e)), ty))
             } else {
                 Err(Error::TypeError(
@@ -126,7 +153,7 @@ fn type_expr(
         // The code here should be the same of the one at the previous branch
         ast::Expr::PostfixDecr(e) => {
             if e.is_lvalue() {
-                let e @ (_, ty) = type_expr(*e, var_env, fun_env)?;
+                let e @ (_, ty) = type_expr(*e, env)?;
                 Ok((ast::Expr::PostfixDecr(Box::new(e)), ty))
             } else {
                 Err(Error::TypeError(
@@ -135,11 +162,11 @@ fn type_expr(
             }
         }
         ast::Expr::Pos(e) => {
-            let e @ (_, ty) = type_expr(*e, var_env, fun_env)?;
+            let e @ (_, ty) = type_expr(*e, env)?;
 
             if !ty.is_eq(&ast::Type::INT) {
                 return Err(Error::TypeError(format!(
-                    "Can't use uneary operation + on a non-int of type {}",
+                    "Can't use unary operation + on a non-int of type {}",
                     ty
                 )));
             }
@@ -147,19 +174,23 @@ fn type_expr(
         }
         // The code here should be the same of the one at the previous branch
         ast::Expr::Neg(e) => {
-            let e @ (_, ty) = type_expr(*e, var_env, fun_env)?;
+            let e @ (_, ty) = type_expr(*e, env)?;
 
             if !ty.is_eq(&ast::Type::INT) {
                 return Err(Error::TypeError(format!(
-                    "Can't use uneary operation - on a non-int of type {}",
+                    "Can't use unary operation - on a non-int of type {}",
                     ty
                 )));
             }
             Ok((ast::Expr::Neg(Box::new(e)), ast::Type::INT))
         }
         ast::Expr::Not(e) => {
-            let e @ (_, ty) = type_expr(*e, var_env, fun_env)
-                .map(|(e, _)| (e, ast::Type::INT))?;
+            let e @ (_, ty) = type_expr(*e, env)?;
+            if ty.is_eq(&ast::Type::VOID) {
+                return Err(Error::TypeError(
+                    "Can't use unary operation ! on void".into(),
+                ));
+            }
             Ok((ast::Expr::Not(Box::new(e)), ty))
         }
         ast::Expr::Op {
@@ -173,8 +204,8 @@ fn type_expr(
             lhs,
             rhs,
         } => {
-            let lhs @ (_, ty1) = type_expr(*lhs, var_env, fun_env)?;
-            let rhs @ (_, ty2) = type_expr(*rhs, var_env, fun_env)?;
+            let lhs @ (_, ty1) = type_expr(*lhs, env)?;
+            let rhs @ (_, ty2) = type_expr(*rhs, env)?;
             if !ty1.is_eq(&ty2) {
                 return Err(Error::TypeError(format!(
                     "Type mismatch on comparison : {} != {}",
@@ -200,18 +231,12 @@ fn type_expr(
             lhs,
             rhs,
         } => {
-            let lhs @ (_, ty1) = type_expr(*lhs, var_env, fun_env)?;
-            let rhs @ (_, ty2) = type_expr(*rhs, var_env, fun_env)?;
-            if ty1.is_eq(&ast::Type::INT) {
+            let lhs @ (_, ty1) = type_expr(*lhs, env)?;
+            let rhs @ (_, ty2) = type_expr(*rhs, env)?;
+            if !ty1.is_eq(&ast::Type::INT) || !ty1.is_eq(&ty2) {
                 return Err(Error::TypeError(format!(
-                    "Can't use arithmetic operation on non-int of type {}",
-                    ty1
-                )));
-            }
-            if ty1.is_eq(&ty2) {
-                return Err(Error::TypeError(format!(
-                    "Can't use arithmetic operation on non-int of type {}",
-                    ty2
+                    "Can't use arithmetic operation on non-int of type {} and {}",
+                    ty1, ty2
                 )));
             }
             Ok((
@@ -224,31 +249,19 @@ fn type_expr(
             ))
         }
         ast::Expr::Op {
-            op: op @ (ast::BinOp::Add | ast::BinOp::Sub),
+            op: ast::BinOp::Add,
             lhs,
             rhs,
         } => {
-            let lhs @ (_, mut ty1) = type_expr(*lhs, var_env, fun_env)?;
-            let rhs @ (_, mut ty2) = type_expr(*rhs, var_env, fun_env)?;
+            let lhs @ (_, mut ty1) = type_expr(*lhs, env)?;
+            let rhs @ (_, mut ty2) = type_expr(*rhs, env)?;
             let e = ast::Expr::Op {
-                op,
+                op: ast::BinOp::Add,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
             };
             if ty1.is_ptr() && ty2.is_ptr() {
-                if let ast::BinOp::Add = op {
-                    return Err(Error::TypeError(
-                        "Can't add ptr together".into(),
-                    ));
-                }
-
-                if ty1 != ty2 {
-                    return Err(Error::TypeError(
-                        format!("Can't substracte pointers of different types : {} != {}", ty1, ty2)
-                    ));
-                }
-
-                return Ok((e, ast::Type::INT));
+                return Err(Error::TypeError("Can't add ptr together".into()));
             }
 
             if ty2.is_ptr() {
@@ -257,22 +270,71 @@ fn type_expr(
 
             if ty1.is_ptr() {
                 if !ty2.is_eq(&ast::Type::INT) {
-                    return Err(Error::TypeError("Can't add together a pointer and a non-int, or subtract a pointer and a non-int, non-pointer expression".into()));
+                    return Err(Error::TypeError(
+                        "Can't add together a pointer and a non-int".into(),
+                    ));
                 }
 
                 Ok((e, ty1))
             } else {
                 if !ty1.is_eq(&ty2) || !ty1.is_eq(&ast::Type::INT) {
-                    return Err(Error::TypeError("Can't use addition or substraction between non-integers or non-pointers".into()));
+                    return Err(Error::TypeError(
+                        "Can't use addition on non-integers or non-pointers"
+                            .into(),
+                    ));
+                }
+
+                Ok((e, ast::Type::INT))
+            }
+        }
+        ast::Expr::Op {
+            op: ast::BinOp::Sub,
+            lhs,
+            rhs,
+        } => {
+            let lhs @ (_, ty1) = type_expr(*lhs, env)?;
+            let rhs @ (_, ty2) = type_expr(*rhs, env)?;
+            let e = ast::Expr::Op {
+                op: ast::BinOp::Sub,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            };
+            if ty1.is_ptr() && ty2.is_ptr() {
+                if ty1 != ty2 {
+                    return Err(Error::TypeError(format!(
+                        "Can't subtract pointers of different types : {} != {}",
+                        ty1, ty2
+                    )));
+                }
+
+                return Ok((e, ast::Type::INT));
+            }
+
+            if ty1.is_ptr() {
+                if ty2.is_ptr() {
+                    return Ok((e, ast::Type::INT));
+                }
+
+                if !ty2.is_eq(&ast::Type::INT) {
+                    return Err(Error::TypeError(
+                        "Can't subtract a non-int to a pointer".into(),
+                    ));
+                }
+
+                Ok((e, ty1))
+            } else {
+                if !ty1.is_eq(&ty2) || !ty1.is_eq(&ast::Type::INT) {
+                    return Err(Error::TypeError(format!(
+                        "Can't subtract {} to {}",
+                        ty1, ty2
+                    )));
                 }
 
                 Ok((e, ast::Type::INT))
             }
         }
         ast::Expr::Call { name, args } => {
-            let (args_ty, ret_ty) =
-                fun_env.get(&name).ok_or(Error::NameError)?.clone();
-
+            let (ret_ty, args_ty) = get_fun(env, name)?.clone();
             if args.len() != args_ty.len() {
                 return Err(Error::TypeError(format!(
                     "Arguments' count mismatch : expected {}, got {}",
@@ -284,9 +346,9 @@ fn type_expr(
             let mut typed_args = Vec::new();
 
             for (arg, ty) in args.into_iter().zip(args_ty.iter()) {
-                let arg @ (_, arg_ty) = type_expr(arg, var_env, fun_env)?;
+                let arg @ (_, arg_ty) = type_expr(arg, env)?;
 
-                if arg_ty.is_eq(ty) {
+                if !arg_ty.is_eq(ty) {
                     return Err(Error::TypeError(format!(
                         "Argument type mismatch, expected {}, got {}",
                         arg_ty, ty
@@ -311,8 +373,7 @@ fn typecheck_instr(
     instr: ast::Instr,
     loop_level: usize,
     expected_return_type: ast::Type,
-    var_env: &mut HashMap<usize, ast::Type>,
-    fun_env: &mut HashMap<usize, (Vec<ast::Type>, ast::Type)>,
+    env: &mut HashMap<ast::Ident, Binding>,
 ) -> Result<TypedInstr<ast::Instr<TypeAnnotion>>> {
     match instr {
         ast::Instr::EmptyInstr => Ok(TypedInstr {
@@ -321,7 +382,7 @@ fn typecheck_instr(
             expected_return_type,
         }),
         ast::Instr::ExprInstr(e) => Ok(TypedInstr {
-            instr: ast::Instr::ExprInstr(type_expr(e, var_env, fun_env)?),
+            instr: ast::Instr::ExprInstr(type_expr(e, env)?),
             loop_level,
             expected_return_type,
         }),
@@ -330,21 +391,24 @@ fn typecheck_instr(
             then_branch,
             else_branch,
         } => {
-            let cond = type_expr(cond, var_env, fun_env)?;
+            let cond @ (_, ty) = type_expr(cond, env)?;
             let then_branch = typecheck_instr(
                 *then_branch,
                 loop_level,
                 expected_return_type,
-                var_env,
-                fun_env,
+                env,
             )?;
             let else_branch = typecheck_instr(
                 *else_branch,
                 loop_level,
                 expected_return_type,
-                var_env,
-                fun_env,
+                env,
             )?;
+            if ty.is_eq(&ast::Type::VOID) {
+                return Err(Error::TypeError(
+                    "The condition in an if can't be of type void".into(),
+                ));
+            }
             if then_branch.expected_return_type
                 != else_branch.expected_return_type
             {
@@ -373,14 +437,18 @@ fn typecheck_instr(
             })
         }
         ast::Instr::While { cond, body } => {
-            let cond = type_expr(cond, var_env, fun_env)?;
+            let cond @ (_, ty) = type_expr(cond, env)?;
             let body = typecheck_instr(
                 *body,
                 loop_level + 1,
                 expected_return_type,
-                var_env,
-                fun_env,
+                env,
             )?;
+            if ty.is_eq(&ast::Type::VOID) {
+                return Err(Error::TypeError(
+                    "The condition in a while can't be of type void".into(),
+                ));
+            }
             if body.expected_return_type != expected_return_type {
                 return Err(Error::TypeError(format!(
                     "while body don't return the right type, expected {}, got {}",
@@ -403,20 +471,30 @@ fn typecheck_instr(
             incr,
             body,
         } => {
-            let cond = cond
-                .map(|cond| type_expr(cond, var_env, fun_env))
-                .transpose()?;
+            let cond = cond.map(|cond| type_expr(cond, env)).transpose()?;
             let incr = incr
                 .into_iter()
-                .map(|incr| type_expr(incr, var_env, fun_env))
+                .map(|incr| type_expr(incr, env))
                 .collect::<Result<Vec<_>>>()?;
             let body = Box::new(typecheck_instr(
                 *body,
                 loop_level + 1,
                 expected_return_type,
-                var_env,
-                fun_env,
+                env,
             )?);
+
+            cond.as_ref()
+                .map(|(_, ty)| {
+                    if ty.is_eq(&ast::Type::VOID) {
+                        return Err(Error::TypeError(
+                            "The condition in an if can't be of type void"
+                                .into(),
+                        ));
+                    } else {
+                        Ok(())
+                    }
+                })
+                .transpose()?;
 
             if body.expected_return_type != expected_return_type {
                 return Err(Error::TypeError(format!(
@@ -452,16 +530,11 @@ fn typecheck_instr(
             ],
             loop_level,
             expected_return_type,
-            var_env,
-            fun_env,
+            env,
         ),
-        ast::Instr::Block(block) => typecheck_block(
-            block,
-            loop_level,
-            expected_return_type,
-            var_env,
-            fun_env,
-        ),
+        ast::Instr::Block(block) => {
+            typecheck_block(block, loop_level, expected_return_type, env)
+        }
         ast::Instr::Return(None) => {
             if expected_return_type != ast::Type::VOID {
                 return Err(Error::TypeError(format!(
@@ -476,7 +549,7 @@ fn typecheck_instr(
             })
         }
         ast::Instr::Return(Some(e)) => {
-            let e @ (_, ty) = type_expr(e, var_env, fun_env)?;
+            let e @ (_, ty) = type_expr(e, env)?;
             if !ty.is_eq(&expected_return_type) {
                 return Err(Error::TypeError(format!(
                     "return type mismatch, expected {}, got {}",
@@ -508,25 +581,18 @@ fn typecheck_block(
     block: Vec<ast::DeclOrInstr>,
     loop_level: usize,
     expected_return_type: ast::Type,
-    var_env: &mut HashMap<usize, ast::Type>,
-    fun_env: &mut HashMap<usize, (Vec<ast::Type>, ast::Type)>,
+    env: &mut HashMap<usize, Binding>,
 ) -> Result<TypedInstr<ast::Instr<TypeAnnotion>>> {
-    let mut new_var_bindings: Vec<(ast::Ident, Option<ast::Type>)> = Vec::new();
-    let mut new_fun_bindings: Vec<(
-        usize,
-        Option<(Vec<ast::Type>, ast::Type)>,
-    )> = Vec::new();
+    let mut new_bindings: Vec<(ast::Ident, Option<Binding>)> = Vec::new();
     let mut ret = Vec::new();
 
     fn assert_var_is_not_reused(
         var_name: ast::Ident,
-        new_var_bindings: &[(usize, Option<ast::Type>)],
-        new_fun_bindings: &[(usize, Option<(Vec<ast::Type>, ast::Type)>)],
+        new_bindings: &[(usize, Option<Binding>)],
     ) -> Result<()> {
-        if new_var_bindings
+        if new_bindings
             .iter()
             .map(|(name, _)| *name)
-            .chain(new_fun_bindings.iter().map(|(name, _)| *name))
             .find(|name| *name == var_name)
             .is_some()
         {
@@ -542,14 +608,9 @@ fn typecheck_block(
     for decl_or_instr in block {
         match decl_or_instr {
             ast::DeclOrInstr::Fun(fun_decl) => {
-                assert_var_is_not_reused(
-                    fun_decl.name,
-                    &new_var_bindings,
-                    &new_fun_bindings,
-                )?;
-                let fun_decl = typecheck_fun(fun_decl, var_env, fun_env)?;
-                new_fun_bindings
-                    .push((fun_decl.name, fun_env.remove(&fun_decl.name)));
+                assert_var_is_not_reused(fun_decl.name, &new_bindings)?;
+                let fun_decl = typecheck_fun(fun_decl, env)?;
+                new_bindings.push((fun_decl.name, env.remove(&fun_decl.name)));
                 ret.push(ast::DeclOrInstr::Fun(fun_decl));
             }
             ast::DeclOrInstr::Var(var_decl) => {
@@ -559,18 +620,26 @@ fn typecheck_block(
                         "can't assign variable of void type".into(),
                     ));
                 }
-                assert_var_is_not_reused(
-                    var_decl.name,
-                    &new_var_bindings,
-                    &new_fun_bindings,
-                )?;
-                new_var_bindings
-                    .push((var_decl.name, var_env.remove(&var_decl.name)));
-                var_env.insert(var_decl.name, var_decl.ty);
+                assert_var_is_not_reused(var_decl.name, &new_bindings)?;
+                new_bindings.push((var_decl.name, env.remove(&var_decl.name)));
+                env.insert(var_decl.name, Binding::Var(var_decl.ty));
                 let value = var_decl
                     .value
-                    .map(|value| type_expr(value, var_env, fun_env))
+                    .map(|value| type_expr(value, env))
                     .transpose()?;
+
+                if value
+                    .as_ref()
+                    .map(|(_, ty)| !ty.is_eq(&var_decl.ty))
+                    .unwrap_or(false)
+                {
+                    return Err(Error::TypeError(format!(
+                        "Mismatch type on assignation, expected {}, got {}",
+                        var_decl.ty,
+                        value.unwrap().1,
+                    )));
+                }
+
                 ret.push(ast::DeclOrInstr::Var(ast::VarDecl {
                     ty: var_decl.ty,
                     name: var_decl.name,
@@ -582,26 +651,19 @@ fn typecheck_block(
                     instr,
                     loop_level,
                     expected_return_type,
-                    var_env,
-                    fun_env,
+                    env,
                 )?))
             }
         }
     }
-    for (name, old_binding) in new_var_bindings {
-        if let Some(old_ty) = old_binding {
-            var_env.insert(name, old_ty);
+    for (name, old_binding) in new_bindings {
+        if let Some(binding) = old_binding {
+            env.insert(name, binding);
         } else {
-            var_env.remove(&name);
+            env.remove(&name);
         }
     }
-    for (name, old_binding) in new_fun_bindings {
-        if let Some((old_params, old_ty)) = old_binding {
-            fun_env.insert(name, (old_params, old_ty));
-        } else {
-            fun_env.remove(&name);
-        }
-    }
+
     Ok(TypedInstr {
         instr: ast::Instr::Block(ret),
         loop_level,
@@ -614,8 +676,7 @@ fn typecheck_block(
 /// and saved previous value
 fn typecheck_fun(
     decl: ast::FunDecl,
-    var_env: &mut HashMap<usize, ast::Type>,
-    fun_env: &mut HashMap<usize, (Vec<ast::Type>, ast::Type)>,
+    env: &mut HashMap<usize, Binding>,
 ) -> Result<ast::FunDecl<TypeAnnotion>> {
     let code = decl
         .params
@@ -629,15 +690,15 @@ fn typecheck_fun(
         })
         .chain(decl.code.into_iter())
         .collect::<Vec<_>>();
-    fun_env.insert(
+    env.insert(
         decl.name,
-        (
-            decl.params.iter().map(|(ty, _)| ty).cloned().collect(),
+        Binding::Fun((
             decl.ty,
-        ),
+            decl.params.iter().map(|(ty, _)| ty).cloned().collect(),
+        )),
     );
 
-    let typed_instr = typecheck_block(code, 0, decl.ty, var_env, fun_env)?;
+    let typed_instr = typecheck_block(code, 0, decl.ty, env)?;
 
     let ast::Instr::Block(mut code) =
         typed_instr.instr
@@ -681,12 +742,18 @@ pub fn typecheck(
         });
     }
 
-    let mut var_env = HashMap::new();
-    let mut fun_env = HashMap::new();
+    let mut env = HashMap::new();
+    env.insert(0, Binding::Fun((ast::Type::VOID_PTR, vec![ast::Type::INT])));
+    env.insert(1, Binding::Fun((ast::Type::INT, vec![ast::Type::INT])));
     let mut fun_decls = Vec::new();
 
     for decl in file.fun_decls {
-        fun_decls.push(typecheck_fun(decl, &mut var_env, &mut fun_env)?);
+        if get_fun(&env, decl.name).is_ok() {
+            // TODO : Add the function name
+            return Err(Error::TypeError("Function is already defined".into()));
+        }
+
+        fun_decls.push(typecheck_fun(decl, &mut env)?);
     }
 
     Ok(ast::File { fun_decls })
