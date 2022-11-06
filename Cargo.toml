@@ -8,5 +8,5 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 clap = { version = "4.0.18", features = ["derive"] }
-beans = "3.2"
+beans = "4.0"
 thiserror = "1.0.37"

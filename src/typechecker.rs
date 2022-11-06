@@ -1,3 +1,5 @@
+use crate::parsing::SpanAnnotation;
+
 use super::{
     ast,
     error::{Error, Result},
@@ -5,24 +7,25 @@ use super::{
 
 use std::collections::HashMap;
 
-pub struct TypeAnnotion;
+pub struct TypeAnnotation;
 pub struct TypedInstr<T> {
     instr: T,
     loop_level: usize,
     expected_return_type: ast::Type,
 }
 
-impl ast::Annotation for TypeAnnotion {
+impl ast::Annotation for TypeAnnotation {
     type Ident = ast::Ident;
     type Type = ast::Type;
     type WrapExpr<T> = (T, ast::Type);
     type WrapInstr<T> = TypedInstr<T>;
     type WrapFunDecl<T> = T;
     type WrapVarDecl<T> = T;
+    type WrapElseBranch<T> = TypedInstr<T>;
 }
 
 pub type TypedExpr =
-    <TypeAnnotion as ast::Annotation>::WrapExpr<ast::Expr<TypeAnnotion>>;
+    <TypeAnnotation as ast::Annotation>::WrapExpr<ast::Expr<TypeAnnotation>>;
 
 fn type_expr(
     e: ast::Expr,
@@ -313,7 +316,7 @@ fn typecheck_instr(
     expected_return_type: ast::Type,
     var_env: &mut HashMap<usize, ast::Type>,
     fun_env: &mut HashMap<usize, (Vec<ast::Type>, ast::Type)>,
-) -> Result<TypedInstr<ast::Instr<TypeAnnotion>>> {
+) -> Result<TypedInstr<ast::Instr<TypeAnnotation>>> {
     match instr {
         ast::Instr::EmptyInstr => Ok(TypedInstr {
             instr: ast::Instr::EmptyInstr,
@@ -510,7 +513,7 @@ fn typecheck_block(
     expected_return_type: ast::Type,
     var_env: &mut HashMap<usize, ast::Type>,
     fun_env: &mut HashMap<usize, (Vec<ast::Type>, ast::Type)>,
-) -> Result<TypedInstr<ast::Instr<TypeAnnotion>>> {
+) -> Result<TypedInstr<ast::Instr<TypeAnnotation>>> {
     let mut new_var_bindings: Vec<(ast::Ident, Option<ast::Type>)> = Vec::new();
     let mut new_fun_bindings: Vec<(
         usize,
@@ -616,7 +619,7 @@ fn typecheck_fun(
     decl: ast::FunDecl,
     var_env: &mut HashMap<usize, ast::Type>,
     fun_env: &mut HashMap<usize, (Vec<ast::Type>, ast::Type)>,
-) -> Result<ast::FunDecl<TypeAnnotion>> {
+) -> Result<ast::FunDecl<TypeAnnotation>> {
     let code = decl
         .params
         .iter()
@@ -661,9 +664,9 @@ fn typecheck_fun(
 }
 
 pub fn typecheck(
-    file: ast::File,
+    file: ast::File<SpanAnnotation>,
     string_store: &[String],
-) -> Result<ast::File<TypeAnnotion>> {
+) -> Result<ast::File<TypeAnnotation>> {
     let main_decl = file
         .fun_decls
         .iter()
