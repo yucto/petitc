@@ -1,3 +1,5 @@
+use beans::location::Span;
+
 /// All strings are represented by an index in a Vec<String>
 /// which should be passed along with the AST
 pub type Ident = usize;
@@ -10,6 +12,7 @@ pub trait Annotation {
     type WrapInstr<T>;
     type WrapFunDecl<T>;
     type WrapVarDecl<T>;
+    type WrapElseBranch<T>;
 }
 
 /// For developing purpose
@@ -24,6 +27,7 @@ impl Annotation for DummyAnnotation {
     type WrapInstr<T> = T;
     type WrapFunDecl<T> = T;
     type WrapVarDecl<T> = T;
+    type WrapElseBranch<T> = T;
 }
 
 pub struct File<A: Annotation = DummyAnnotation> {
@@ -171,14 +175,14 @@ pub enum Expr<A: Annotation = DummyAnnotation> {
     Deref(Box<A::WrapExpr<Expr<A>>>),
     // Assign { lhs, rhs } represents lhs = rhs
     Assign { lhs: Box<A::WrapExpr<Expr<A>>>, rhs: Box<A::WrapExpr<Expr<A>>> },
-    Call { name: Ident, args: Vec<A::WrapExpr<Expr<A>>> },
+    Call { name: A::Ident, args: Vec<A::WrapExpr<Expr<A>>> },
     PrefixIncr(Box<A::WrapExpr<Expr<A>>>), PrefixDecr(Box<A::WrapExpr<Expr<A>>>),
     PostfixIncr(Box<A::WrapExpr<Expr<A>>>), PostfixDecr(Box<A::WrapExpr<Expr<A>>>),
     Addr(Box<A::WrapExpr<Expr<A>>>), Not(Box<A::WrapExpr<Expr<A>>>),
     Neg(Box<A::WrapExpr<Expr<A>>>), Pos(Box<A::WrapExpr<Expr<A>>>),
     // Op { op, lhs, rhs } represents lhs op rhs
     Op { op: BinOp, lhs: Box<A::WrapExpr<Expr<A>>>, rhs: Box<A::WrapExpr<Expr<A>>> },
-    SizeOf(Type),
+    SizeOf(A::Type),
 }
 
 impl<A: Annotation> Expr<A> {
@@ -200,7 +204,7 @@ pub enum Instr<A: Annotation = DummyAnnotation> {
         cond: A::WrapExpr<Expr<A>>,
         then_branch: Box<A::WrapInstr<Instr<A>>>,
         /// Default to EmptyInstr if not present
-        else_branch: Box<A::WrapInstr<Instr<A>>>,
+        else_branch: Box<A::WrapElseBranch<Instr<A>>>,
     },
     /// while (cond) body
     While {

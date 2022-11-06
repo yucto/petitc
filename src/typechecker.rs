@@ -1,3 +1,5 @@
+use crate::parsing::SpanAnnotation;
+
 use super::{
     ast,
     error::{Error, Result},
@@ -5,24 +7,25 @@ use super::{
 
 use std::collections::HashMap;
 
-pub struct TypeAnnotion;
+pub struct TypeAnnotation;
 pub struct TypedInstr<T> {
     pub instr: T,
     pub loop_level: usize,
     pub expected_return_type: ast::Type,
 }
 
-impl ast::Annotation for TypeAnnotion {
+impl ast::Annotation for TypeAnnotation {
     type Ident = ast::Ident;
     type Type = ast::Type;
     type WrapExpr<T> = (T, ast::Type);
     type WrapInstr<T> = TypedInstr<T>;
     type WrapFunDecl<T> = T;
     type WrapVarDecl<T> = T;
+    type WrapElseBranch<T> = TypedInstr<T>;
 }
 
 pub type TypedExpr =
-    <TypeAnnotion as ast::Annotation>::WrapExpr<ast::Expr<TypeAnnotion>>;
+    <TypeAnnotation as ast::Annotation>::WrapExpr<ast::Expr<TypeAnnotation>>;
 
 enum Binding {
     Var(ast::Type),
@@ -374,7 +377,7 @@ fn typecheck_instr(
     loop_level: usize,
     expected_return_type: ast::Type,
     env: &mut HashMap<ast::Ident, Binding>,
-) -> Result<TypedInstr<ast::Instr<TypeAnnotion>>> {
+) -> Result<TypedInstr<ast::Instr<TypeAnnotation>>> {
     match instr {
         ast::Instr::EmptyInstr => Ok(TypedInstr {
             instr: ast::Instr::EmptyInstr,
@@ -582,7 +585,7 @@ fn typecheck_block(
     loop_level: usize,
     expected_return_type: ast::Type,
     env: &mut HashMap<usize, Binding>,
-) -> Result<TypedInstr<ast::Instr<TypeAnnotion>>> {
+) -> Result<TypedInstr<ast::Instr<TypeAnnotation>>> {
     let mut new_bindings: Vec<(ast::Ident, Option<Binding>)> = Vec::new();
     let mut ret = Vec::new();
 
@@ -677,7 +680,7 @@ fn typecheck_block(
 fn typecheck_fun(
     decl: ast::FunDecl,
     env: &mut HashMap<usize, Binding>,
-) -> Result<ast::FunDecl<TypeAnnotion>> {
+) -> Result<ast::FunDecl<TypeAnnotation>> {
     let code = decl
         .params
         .iter()
@@ -722,23 +725,19 @@ fn typecheck_fun(
 }
 
 pub fn typecheck(
-    file: ast::File,
+    file: ast::File<SpanAnnotation>,
     string_store: &[String],
-) -> Result<ast::File<TypeAnnotion>> {
+) -> Result<ast::File<TypeAnnotation>> {
     let main_decl = file
         .fun_decls
         .iter()
-        .find(|decl| string_store[decl.name] == "main")
-        .ok_or(Error::NoMainFunction)?;
-    if main_decl.ty != ast::Type::INT || main_decl.params.len() != 0 {
+        .find(|decl| string_store[decl.inner.name.inner] == "main")
+        .ok_or(Error::NoMainFunction)?
+        .inner;
+    if main_decl.ty.inner != ast::Type::INT || main_decl.params.len() != 0 {
         return Err(Error::IncorrectMainFunctionType {
-            ty: main_decl.ty,
-            params: main_decl
-                .params
-                .iter()
-                .map(|(ty, _)| ty)
-                .cloned()
-                .collect(),
+            ty: main_decl.ty.inner,
+            params: main_decl.params.iter().map(|(ty, _)| ty.inner).collect(),
         });
     }
 
@@ -748,12 +747,12 @@ pub fn typecheck(
     let mut fun_decls = Vec::new();
 
     for decl in file.fun_decls {
-        if get_fun(&env, decl.name).is_ok() {
+        if get_fun(&env, decl.inner.name.inner).is_ok() {
             // TODO : Add the function name
             return Err(Error::TypeError("Function is already defined".into()));
         }
 
-        fun_decls.push(typecheck_fun(decl, &mut env)?);
+        fun_decls.push(typecheck_fun(decl.inner, &mut env)?);
     }
 
     Ok(ast::File { fun_decls })

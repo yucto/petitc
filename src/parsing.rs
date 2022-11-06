@@ -1,12 +1,15 @@
+use std::rc::Rc;
 use std::{collections::HashMap, path::Path};
 
 use crate::ast::{
-    BinOp, DeclOrInstr, Expr, File, FunDecl, Ident, Instr, Type, VarDecl,
+    Annotation, BinOp, DeclOrInstr, Expr, File, FunDecl, Ident, Instr, Type,
+    VarDecl,
 };
 use crate::error::Result;
 
 use beans::error::WarningSet;
 use beans::include_parser;
+use beans::location::Span;
 use beans::parser::{Parser, Value, AST};
 use beans::stream::StringStream;
 
@@ -25,7 +28,7 @@ macro_rules! error {
 
 macro_rules! get {
     ($node:expr, $key:literal) => {
-        $node.remove($key).unwrap_or_else(|| {
+        $node.attributes.remove($key).unwrap_or_else(|| {
             error!("expected to find child {}, got\n{:?}", $key, $node)
         })
     };
@@ -33,8 +36,11 @@ macro_rules! get {
 
 macro_rules! node {
     ($node:expr) => {
-        if let AST::Node { attributes, .. } = $node {
-            attributes
+        if let AST::Node {
+            attributes, span, ..
+        } = $node
+        {
+            AstNode { attributes, span }
         } else {
             error!("expected to find node");
         }
@@ -42,9 +48,24 @@ macro_rules! node {
 }
 
 macro_rules! value {
-    ($node:expr, $key:literal) => {
-        if let AST::Literal(Value::Str(result)) = get!($node, $key) {
+    ($node:expr => $key:literal) => {
+        if let AST::Literal {
+            value: Value::Str(result),
+            ..
+        } = get!($node, $key)
+        {
             result
+        } else {
+            error!("expected to find value, got\n{:?}", $node);
+        }
+    };
+    ($node:expr => .$key:literal) => {
+        if let AST::Literal {
+            value: Value::Str(result),
+            span: Some(span),
+        } = get!($node, $key)
+        {
+            (result, span)
         } else {
             error!("expected to find value, got\n{:?}", $node);
         }
@@ -55,21 +76,86 @@ macro_rules! match_variant {
     (($node:expr) {
 	$($variant:literal => $code:expr),* $(,)?
     }) => {
-	let variant = value!($node, "variant");
+	let variant = value!($node => "variant");
 	match &*variant {
 	    $($variant => $code,)*
 	    found_variant => error!("Unexpected variant {}", found_variant),
 	}
     };
+    (($node:expr) .{
+	$($variant:literal => $code:expr),* $(,)?
+    }) => {
+	let variant = value!($node => "variant");
+	match &*variant {
+	    $($variant => WithSpan {
+		inner: $code,
+		span: $node.span.clone(),
+	    },)*
+	    found_variant => error!("Unexpected variant {}", found_variant),
+	}
+    };
+}
+
+pub struct SpanAnnotation;
+
+impl Annotation for SpanAnnotation {
+    type Ident = WithSpan<Ident>;
+    type Type = WithSpan<Type>;
+    type WrapExpr<T> = WithSpan<T>;
+    type WrapInstr<T> = WithSpan<T>;
+    type WrapFunDecl<T> = WithSpan<T>;
+    type WrapVarDecl<T> = WithSpan<T>;
+    type WrapElseBranch<T> = Option<WithSpan<T>>;
+}
+
+#[derive(Clone)]
+pub struct WithSpan<T> {
+    pub inner: T,
+    pub span: Span,
+}
+
+impl<T> WithSpan<T> {
+    pub fn map<U>(self, f: impl Fn(T) -> U) -> WithSpan<U> {
+        WithSpan {
+            inner: f(self.inner),
+            span: self.span,
+        }
+    }
+
+    pub fn with_span(self, span: Span) -> Self {
+        Self { span, ..self }
+    }
+}
+
+#[derive(Debug)]
+struct AstNode {
+    attributes: HashMap<Rc<str>, AST>,
+    span: Span,
+}
+
+fn read_spanned_ident(
+    (ident, ident_span): (Rc<str>, Span),
+    string_store: &mut Vec<String>,
+    string_assoc: &mut HashMap<String, usize>,
+) -> WithSpan<Ident> {
+    let actual_ident =
+        *string_assoc.entry(ident.to_string()).or_insert_with(|| {
+            string_store.push(ident.to_string());
+            string_store.len() - 1
+        });
+    WithSpan {
+        inner: actual_ident,
+        span: ident_span,
+    }
 }
 
 fn read_ident(
-    ident: String,
+    ident: Rc<str>,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
-) -> usize {
-    *string_assoc.entry(ident.clone()).or_insert_with(|| {
-        string_store.push(ident);
+) -> Ident {
+    *string_assoc.entry(ident.to_string()).or_insert_with(|| {
+        string_store.push(ident.to_string());
         string_store.len() - 1
     })
 }
@@ -137,9 +223,10 @@ fn read_else(
     toplevel: bool,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
-) -> Instr {
+) -> WithSpan<Instr<SpanAnnotation>> {
     let mut node = node!(ast);
     read_statement(get!(node, "else"), toplevel, string_store, string_assoc)
+        .with_span(node.span)
 }
 
 fn read_statement(
@@ -147,23 +234,21 @@ fn read_statement(
     toplevel: bool,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
-) -> Instr {
+) -> WithSpan<Instr<SpanAnnotation>> {
     let mut node = node!(ast);
-    match_variant! {(node) {
+    match_variant! {(node) .{
     "None" => Instr::EmptyInstr,
     "Regular" => Instr::ExprInstr(read_expr(get!(node, "stmt"), toplevel, string_store, string_assoc)),
     "If" => Instr::If {
         cond: read_expr(get!(node, "condition"), toplevel, string_store, string_assoc),
         then_branch: Box::new(read_statement(get!(node, "then"), toplevel, string_store, string_assoc)),
         else_branch: Box::new(read_option(
-            |ast, toplevel, string_store, string_assoc| {
-                read_else(ast, toplevel, string_store, string_assoc)
-            },
+            read_else,
             get!(node, "else"),
             toplevel,
             string_store,
             string_assoc
-        ).unwrap_or(Instr::EmptyInstr)),
+        )),
     },
     "While" => Instr::While {
         cond: read_expr(get!(node, "condition"), toplevel, string_store, string_assoc),
@@ -182,15 +267,15 @@ fn read_statement(
     }}
 }
 
-fn read_int(ast: AST) -> Expr {
+fn read_int(ast: AST) -> Expr<SpanAnnotation> {
     let mut node = node!(ast);
     match_variant! {(node) {
-    "Int" => Expr::Int(value!(node, "value").parse().unwrap()),
-    "Char" => Expr::Int(value!(node, "value").as_bytes()[0].into()),
+    "Int" => Expr::Int(value!(node => "value").parse().unwrap()),
+    "Char" => Expr::Int(value!(node => "value").as_bytes()[0].into()),
     }}
 }
 
-fn read_bool(ast: AST) -> Expr {
+fn read_bool(ast: AST) -> Expr<SpanAnnotation> {
     let mut node = node!(ast);
     match_variant! {(node) {
     "True" => Expr::True,
@@ -223,13 +308,13 @@ fn read_expr(
     _toplevel: bool,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, Ident>,
-) -> Expr {
+) -> WithSpan<Expr<SpanAnnotation>> {
     let mut node = node!(ast);
-    match_variant! {(node) {
+    match_variant! {(node) .{
     "Int" => read_int(get!(node, "value")),
     "Bool" => read_bool(get!(node, "value")),
     "Null" => Expr::Null,
-    "Through" => read_expr(get!(node, "this"), _toplevel, string_store, string_assoc),
+    "Through" => return read_expr(get!(node, "this"), _toplevel, string_store, string_assoc),
     "Not" => Expr::Not(Box::new(read_expr(
         get!(node, "value"),
         _toplevel,
@@ -285,17 +370,17 @@ fn read_expr(
         string_assoc,
     ))),
     "Ident" => Expr::Ident(read_ident(
-        value!(node, "value").to_string(),
+        value!(node => "value"),
         string_store,
         string_assoc,
     )),
     "Sizeof" => Expr::SizeOf(read_type(get!(node, "type"))),
     "Call" => Expr::Call {
-        name: read_ident(
-        value!(node, "name").to_string(),
+        name: read_spanned_ident(
+        value!(node => ."name"),
         string_store,
         string_assoc,
-        ),
+    ),
         args: read_list(
         read_expr,
         get!(node, "args"),
@@ -341,9 +426,10 @@ fn read_definition(
     _toplevel: bool,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
-) -> Expr {
+) -> WithSpan<Expr<SpanAnnotation>> {
     let mut node = node!(ast);
     read_expr(get!(node, "value"), _toplevel, string_store, string_assoc)
+        .with_span(node.span)
 }
 
 fn read_variable_declaration(
@@ -351,12 +437,12 @@ fn read_variable_declaration(
     _toplevel: bool,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
-) -> VarDecl {
+) -> WithSpan<VarDecl<SpanAnnotation>> {
     let mut node = node!(ast);
-    VarDecl {
+    let var_decl = VarDecl {
         ty: read_type(get!(node, "type")),
-        name: read_ident(
-            value!(node, "name").to_string(),
+        name: read_spanned_ident(
+            value!(node => ."name"),
             string_store,
             string_assoc,
         ),
@@ -367,6 +453,10 @@ fn read_variable_declaration(
             string_store,
             string_assoc,
         ),
+    };
+    WithSpan {
+        inner: var_decl,
+        span: node.span,
     }
 }
 
@@ -375,7 +465,7 @@ fn read_declaration_or_statement(
     toplevel: bool,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
-) -> DeclOrInstr {
+) -> DeclOrInstr<SpanAnnotation> {
     let mut node = node!(ast);
     match_variant! {(node) {
     "Function" => DeclOrInstr::Fun(read_fun_decl(
@@ -397,25 +487,38 @@ fn read_block(
     ast: AST,
     toplevel: bool,
     string_store: &mut Vec<String>,
+    string_assoc: &mut HashMap<String, Ident>,
+) -> Vec<DeclOrInstr<SpanAnnotation>> {
+    read_annotated_block(ast, toplevel, string_store, string_assoc).inner
+}
+
+fn read_annotated_block(
+    ast: AST,
+    toplevel: bool,
+    string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
-) -> Vec<DeclOrInstr> {
+) -> WithSpan<Vec<DeclOrInstr<SpanAnnotation>>> {
     let mut node = node!(ast);
-    read_list(
+    let block = read_list(
         read_declaration_or_statement,
         get!(node, "stmts"),
         toplevel,
         string_store,
         string_assoc,
-    )
+    );
+    WithSpan {
+        inner: block,
+        span: node.span,
+    }
 }
 
-fn read_type(ast: AST) -> Type {
+fn read_type(ast: AST) -> WithSpan<Type> {
     let mut node = node!(ast);
-    match_variant! {(node) {
+    match_variant! {(node) .{
         "Void" => Type::VOID,
         "Int" => Type::INT,
         "Bool" => Type::BOOL,
-        "Pointer" => read_type(get!(node, "pointed")).ptr()
+        "Pointer" => read_type(get!(node, "pointed")).inner.ptr()
     }}
 }
 
@@ -424,15 +527,11 @@ fn read_typed_param(
     _toplevel: bool,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
-) -> (Type, usize) {
+) -> (WithSpan<Type>, WithSpan<Ident>) {
     let mut node = node!(ast);
     (
         read_type(get!(node, "type")),
-        read_ident(
-            value!(node, "name").to_string(),
-            string_store,
-            string_assoc,
-        ),
+        read_spanned_ident(value!(node => ."name"), string_store, string_assoc),
     )
 }
 
@@ -441,12 +540,12 @@ fn read_fun_decl(
     toplevel: bool,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
-) -> FunDecl {
+) -> WithSpan<FunDecl<SpanAnnotation>> {
     let mut node = node!(ast);
-    FunDecl {
+    let fun_decl = FunDecl {
         ty: read_type(get!(node, "rettype")),
-        name: read_ident(
-            value!(node, "name").to_string(),
+        name: read_spanned_ident(
+            value!(node => ."name"),
             string_store,
             string_assoc,
         ),
@@ -457,17 +556,21 @@ fn read_fun_decl(
             string_store,
             string_assoc,
         ),
-        code: read_block(
+        code: read_annotated_block(
             get!(node, "block"),
             toplevel,
             string_store,
             string_assoc,
         ),
         toplevel,
+    };
+    WithSpan {
+        inner: fun_decl,
+        span: node.span,
     }
 }
 
-fn read_file(ast: AST) -> (File, Vec<String>) {
+fn read_file(ast: AST) -> (File<SpanAnnotation>, Vec<String>) {
     let mut node = node!(ast);
     let mut string_store = vec!["malloc".into(), "putchar".into()];
     let mut string_assoc = HashMap::new();
@@ -491,7 +594,9 @@ fn read_file(ast: AST) -> (File, Vec<String>) {
 /// v[id] represent the ident id
 /// v[0] is guaranteed to be malloc
 /// and v[1] to be putchar
-pub(crate) fn parse_to_ast(source: &Path) -> Result<(File, Vec<String>)> {
+pub(crate) fn parse_to_ast(
+    source: &Path,
+) -> Result<(File<SpanAnnotation>, Vec<String>)> {
     let mut warnings = WarningSet::empty();
     let (lexer, parser) = include_parser!(
         lexer => compiled "../gmrs/petitc.clx",

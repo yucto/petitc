@@ -51,9 +51,9 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "beans"
-version = "3.1.0"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96f5d8dbabc8880ad24bafa239e1a758dfc53dac878451f63ac6134af4157f5f"
+checksum = "10ef088bc35d5d007d401983cae6ac04e8a5a47c7e29ab47bf3d4e9957b81eae"
 dependencies = [
  "anyhow",
  "bincode",
