@@ -22,7 +22,7 @@ pub fn parse(
 
 pub fn typecheck(
     _p: impl AsRef<Path>,
-    file: ast::File,
+    file: ast::File<parsing::SpanAnnotation>,
     string_store: &[String],
 ) -> Result<ast::File<typechecker::TypeAnnotation>> {
     typechecker::typecheck(file, string_store)

@@ -115,6 +115,10 @@ pub struct WithSpan<T> {
 }
 
 impl<T> WithSpan<T> {
+    pub fn new(inner: T, span: Span) -> Self {
+        Self { inner, span }
+    }
+
     pub fn map<U>(self, f: impl Fn(T) -> U) -> WithSpan<U> {
         WithSpan {
             inner: f(self.inner),

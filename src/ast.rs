@@ -1,5 +1,3 @@
-use beans::location::Span;
-
 /// All strings are represented by an index in a Vec<String>
 /// which should be passed along with the AST
 pub type Ident = usize;
@@ -16,9 +14,9 @@ pub trait Annotation {
 }
 
 /// For developing purpose
-/// All bounds = DummyAnnotation shall
+/// All bounds shall
 /// be replaced by a SpanAnnotation later
-pub struct DummyAnnotation;
+struct DummyAnnotation;
 
 impl Annotation for DummyAnnotation {
     type Ident = Ident;
@@ -27,14 +25,14 @@ impl Annotation for DummyAnnotation {
     type WrapInstr<T> = T;
     type WrapFunDecl<T> = T;
     type WrapVarDecl<T> = T;
-    type WrapElseBranch<T> = T;
+    type WrapElseBranch<T> = Option<T>;
 }
 
-pub struct File<A: Annotation = DummyAnnotation> {
+pub struct File<A: Annotation> {
     pub fun_decls: Vec<A::WrapFunDecl<FunDecl<A>>>,
 }
 
-pub struct FunDecl<A: Annotation = DummyAnnotation> {
+pub struct FunDecl<A: Annotation> {
     pub ty: A::Type,
     pub name: A::Ident,
     pub params: Vec<(A::Type, A::Ident)>,
@@ -147,13 +145,13 @@ pub enum BasisType {
     Bool,
 }
 
-pub enum DeclOrInstr<A: Annotation = DummyAnnotation> {
+pub enum DeclOrInstr<A: Annotation> {
     Fun(A::WrapFunDecl<FunDecl<A>>),
     Var(A::WrapVarDecl<VarDecl<A>>),
     Instr(A::WrapInstr<Instr<A>>),
 }
 
-pub struct VarDecl<A: Annotation = DummyAnnotation> {
+pub struct VarDecl<A: Annotation> {
     pub ty: A::Type,
     pub name: A::Ident,
     pub value: Option<A::WrapExpr<Expr<A>>>,
@@ -169,7 +167,7 @@ pub enum BinOp {
 }
 
 #[rustfmt::skip]
-pub enum Expr<A: Annotation = DummyAnnotation> {
+pub enum Expr<A: Annotation> {
     Int(i64), True, False, Null,
     Ident(Ident),
     Deref(Box<A::WrapExpr<Expr<A>>>),
@@ -194,7 +192,7 @@ impl<A: Annotation> Expr<A> {
     }
 }
 
-pub enum Instr<A: Annotation = DummyAnnotation> {
+pub enum Instr<A: Annotation> {
     /// ;
     EmptyInstr,
     /// expr;
