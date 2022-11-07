@@ -86,12 +86,13 @@ macro_rules! match_variant {
 	$($variant:literal => $code:expr),* $(,)?
     }) => {
 	let variant = value!($node => "variant");
-	match &*variant {
-	    $($variant => WithSpan {
-		inner: $code,
-		span: $node.span.clone(),
-	    },)*
+	let inner = match &*variant {
+	    $($variant => $code,)*
 	    found_variant => error!("Unexpected variant {}", found_variant),
+	};
+	WithSpan {
+	    inner,
+	    span: $node.span,
 	}
     };
 }
