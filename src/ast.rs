@@ -134,7 +134,7 @@ impl std::fmt::Display for Type {
         for _ in 0..self.indirection_count {
             write!(f, "*")?;
         }
-        write!(f, "")
+        Ok(())
     }
 }
 
