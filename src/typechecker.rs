@@ -2,6 +2,8 @@ use beans::location::Span;
 
 use std::collections::HashMap;
 
+use crate::error::ErrorKind;
+
 use super::{
     ast::*,
     error::{Error, Result},
@@ -45,30 +47,42 @@ enum Binding {
     Fun((Type, Vec<Type>)),
 }
 
-fn get_fun(
-    env: &HashMap<Ident, Binding>,
-    name: Ident,
-) -> Result<&(Type, Vec<Type>)> {
-    if let Some(Binding::Fun(res)) = env.get(&name) {
-        Ok(res)
+type Environment = HashMap<Ident, (Binding, Option<Span>)>;
+
+fn get_fun<'env>(
+    env: &'env Environment,
+    ident: WithSpan<Ident>,
+    name_of: &'_ [String],
+) -> Result<(&'env (Type, Vec<Type>), &'env Option<Span>)> {
+    if let Some((Binding::Fun(res), span)) = env.get(&ident.inner) {
+        Ok((res, span))
     } else {
-        // TODO : no function named name in current scope
-        Err(Error::NameError)
+        Err(Error::new(ErrorKind::NameError {
+            name: name_of[ident.inner].clone(),
+            span: ident.span,
+        }))
     }
 }
 
-fn get_var(env: &HashMap<Ident, Binding>, name: Ident) -> Result<Type> {
-    if let Some(Binding::Var(res)) = env.get(&name) {
+fn get_var(
+    env: &Environment,
+    ident: WithSpan<Ident>,
+    name_of: &[String],
+) -> Result<Type> {
+    if let Some((Binding::Var(res), _)) = env.get(&ident.inner) {
         Ok(*res)
     } else {
-        // TODO : no variable named name in current scope
-        Err(Error::NameError)
+        Err(Error::new(ErrorKind::NameError {
+            name: name_of[ident.inner].clone(),
+            span: ident.span,
+        }))
     }
 }
 
 fn type_expr(
     e: WithSpan<Expr<SpanAnnotation>>,
-    env: &HashMap<Ident, Binding>,
+    env: &Environment,
+    name_of: &[String],
 ) -> Result<TypedExpr> {
     match e.inner {
         Expr::True => Ok(WithType::new(Expr::True, Type::BOOL, e.span)),
@@ -77,54 +91,69 @@ fn type_expr(
         Expr::Int(n) => Ok(WithType::new(Expr::Int(n), Type::INT, e.span)),
         Expr::Ident(name) => Ok(WithType::new(
             Expr::Ident(name),
-            get_var(env, name)?,
+            get_var(
+                env,
+                WithSpan {
+                    inner: name,
+                    span: e.span.clone(),
+                },
+                name_of,
+            )?,
             e.span,
         )),
         Expr::SizeOf(ty) => {
             if !ty.inner.is_eq(&Type::VOID) {
                 Ok(WithType::new(Expr::SizeOf(ty.clone()), Type::INT, ty.span))
             } else {
-                Err(Error::TypeError("void type has no size".into()))
+                Err(Error::new(ErrorKind::SizeofVoid { span: e.span }))
             }
         }
         Expr::Addr(inner_e) => {
             if inner_e.inner.is_lvalue() {
-                type_expr(*inner_e, env).map(|inner_e| {
+                type_expr(*inner_e, env, name_of).map(|inner_e| {
                     let ty = inner_e.ty.ptr();
                     WithType::new(Expr::Addr(Box::new(inner_e)), ty, e.span)
                 })
             } else {
-                Err(Error::TypeError(
-                    "Can't take the address of a rvalue".into(),
-                ))
+                Err(Error::new(ErrorKind::AddressOfRvalue { span: e.span })
+                    .add_help(String::from("you could allocate this expression, by binding it to a variable")))
             }
         }
-        Expr::Deref(inner_e) => type_expr(*inner_e, env).and_then(|inner_e| {
-            let mut ty = inner_e.ty;
-            if ty.is_ptr() {
-                ty.indirection_count -= 1;
-                Ok(WithType::new(Expr::Deref(Box::new(inner_e)), ty, e.span))
-            } else {
-                Err(Error::TypeError(format!(
-                    "Can't deref non-ptr type {}",
-                    ty
-                )))
-            }
-        }),
+        Expr::Deref(inner_e) => {
+            type_expr(*inner_e, env, name_of).and_then(|inner_e| {
+                let mut ty = inner_e.ty;
+                if ty.is_ptr() {
+                    ty.indirection_count -= 1;
+                    Ok(WithType::new(
+                        Expr::Deref(Box::new(inner_e)),
+                        ty,
+                        e.span,
+                    ))
+                } else {
+                    Err(Error::new(ErrorKind::DerefNonPointer {
+                        ty,
+                        span: inner_e.span,
+                    }))
+                }
+            })
+        }
         Expr::Assign { lhs, rhs } => {
             if !lhs.inner.is_lvalue() {
-                return Err(Error::TypeError("Can't assign to rvalue".into()));
+                return Err(Error::new(ErrorKind::RvalueAssignment {
+                    span: lhs.span,
+                }));
             }
-            let lhs = type_expr(*lhs, env)?;
-            let rhs = type_expr(*rhs, env)?;
+            let lhs = type_expr(*lhs, env, name_of)?;
+            let rhs = type_expr(*rhs, env, name_of)?;
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
 
             if !ty1.is_eq(&ty2) {
-                return Err(Error::TypeError(format!(
-                    "Type mismatch on assignation : {} != {}",
-                    ty1, ty2
-                )));
+                return Err(Error::new(ErrorKind::TypeMismatch {
+                    span: e.span,
+                    expected_type: ty1,
+                    found_type: ty2,
+                }));
             }
 
             Ok(WithType::new(
@@ -136,9 +165,12 @@ fn type_expr(
                 e.span,
             ))
         }
-        Expr::PrefixIncr(inner_e) => {
+        Expr::PrefixIncr(inner_e)
+        | Expr::PrefixDecr(inner_e)
+        | Expr::PostfixIncr(inner_e)
+        | Expr::PostfixDecr(inner_e) => {
             if inner_e.inner.is_lvalue() {
-                let inner_e = type_expr(*inner_e, env)?;
+                let inner_e = type_expr(*inner_e, env, name_of)?;
                 let ty = inner_e.ty;
                 Ok(WithType::new(
                     Expr::PrefixIncr(Box::new(inner_e)),
@@ -146,68 +178,19 @@ fn type_expr(
                     e.span,
                 ))
             } else {
-                Err(Error::TypeError(
-                    "Can't use a prefix operation on a rvalue".into(),
-                ))
-            }
-        }
-        // The code here should be the same of the one at the previous branch
-        Expr::PrefixDecr(inner_e) => {
-            if inner_e.inner.is_lvalue() {
-                let inner_e = type_expr(*inner_e, env)?;
-                let ty = inner_e.ty;
-                Ok(WithType::new(
-                    Expr::PrefixDecr(Box::new(inner_e)),
-                    ty,
-                    e.span,
-                ))
-            } else {
-                Err(Error::TypeError(
-                    "Can't use a prefix operation on a rvalue".into(),
-                ))
-            }
-        }
-        // The code here should be the same of the one at the previous branch
-        Expr::PostfixIncr(inner_e) => {
-            if inner_e.inner.is_lvalue() {
-                let inner_e = type_expr(*inner_e, env)?;
-                let ty = inner_e.ty;
-                Ok(WithType::new(
-                    Expr::PostfixIncr(Box::new(inner_e)),
-                    ty,
-                    e.span,
-                ))
-            } else {
-                Err(Error::TypeError(
-                    "Can't use a postfix operation on a rvalue".into(),
-                ))
-            }
-        }
-        // The code here should be the same of the one at the previous branch
-        Expr::PostfixDecr(inner_e) => {
-            if inner_e.inner.is_lvalue() {
-                let inner_e = type_expr(*inner_e, env)?;
-                let ty = inner_e.ty;
-                Ok(WithType::new(
-                    Expr::PostfixDecr(Box::new(inner_e)),
-                    ty,
-                    e.span,
-                ))
-            } else {
-                Err(Error::TypeError(
-                    "Can't use a postfix operation on a rvalue".into(),
-                ))
+                Err(Error::new(ErrorKind::IncrOrDecrRvalue { span: e.span }))
             }
         }
         Expr::Pos(inner_e) => {
-            let inner_e = type_expr(*inner_e, env)?;
+            let inner_e = type_expr(*inner_e, env, name_of)?;
             let ty = inner_e.ty;
 
             if !ty.is_eq(&Type::INT) {
-                return Err(Error::TypeError(format!(
-                    "Can't use unary operation + on a non-int of type {}",
-                    ty
-                )));
+                return Err(Error::new(ErrorKind::TypeMismatch {
+                    expected_type: Type::INT,
+                    found_type: ty,
+                    span: inner_e.span,
+                }));
             }
             Ok(WithType::new(
                 Expr::Pos(Box::new(inner_e)),
@@ -217,33 +200,36 @@ fn type_expr(
         }
         // The code here should be the same of the one at the previous branch
         Expr::Neg(inner_e) => {
-            let inner_e = type_expr(*inner_e, env)?;
+            let inner_e = type_expr(*inner_e, env, name_of)?;
             let ty = inner_e.ty;
 
             if !ty.is_eq(&Type::INT) {
-                return Err(Error::TypeError(format!(
-                    "Can't use unary operation - on a non-int of type {}",
-                    ty
-                )));
+                Err(Error::new(ErrorKind::TypeMismatch {
+                    expected_type: Type::INT,
+                    found_type: ty,
+                    span: inner_e.span,
+                }))
+            } else {
+                Ok(WithType::new(
+                    Expr::Neg(Box::new(inner_e)),
+                    Type::INT,
+                    e.span,
+                ))
             }
-            Ok(WithType::new(
-                Expr::Neg(Box::new(inner_e)),
-                Type::INT,
-                e.span,
-            ))
         }
         Expr::Not(inner_e) => {
-            let inner_e = type_expr(*inner_e, env)?;
+            let inner_e = type_expr(*inner_e, env, name_of)?;
             if inner_e.ty.is_eq(&Type::VOID) {
-                return Err(Error::TypeError(
-                    "Can't use unary operation ! on void".into(),
-                ));
+                Err(Error::new(ErrorKind::VoidExpression {
+                    span: inner_e.span,
+                }))
+            } else {
+                Ok(WithType::new(
+                    Expr::Not(Box::new(inner_e)),
+                    Type::INT,
+                    e.span,
+                ))
             }
-            Ok(WithType::new(
-                Expr::Not(Box::new(inner_e)),
-                Type::INT,
-                e.span,
-            ))
         }
         Expr::Op {
             op:
@@ -256,25 +242,27 @@ fn type_expr(
             lhs,
             rhs,
         } => {
-            let lhs = type_expr(*lhs, env)?;
-            let rhs = type_expr(*rhs, env)?;
+            let lhs = type_expr(*lhs, env, name_of)?;
+            let rhs = type_expr(*rhs, env, name_of)?;
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
             if !ty1.is_eq(&ty2) {
-                return Err(Error::TypeError(format!(
-                    "Type mismatch on comparison : {} != {}",
-                    ty1, ty2
-                )));
+                Err(Error::new(ErrorKind::TypeMismatch {
+                    span: rhs.span,
+                    expected_type: ty1,
+                    found_type: ty2,
+                }))
+            } else {
+                Ok(WithType::new(
+                    Expr::Op {
+                        op,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    },
+                    Type::INT,
+                    e.span,
+                ))
             }
-            Ok(WithType::new(
-                Expr::Op {
-                    op,
-                    lhs: Box::new(lhs),
-                    rhs: Box::new(rhs),
-                },
-                Type::INT,
-                e.span,
-            ))
         }
         Expr::Op {
             op:
@@ -286,15 +274,23 @@ fn type_expr(
             lhs,
             rhs,
         } => {
-            let lhs = type_expr(*lhs, env)?;
-            let rhs = type_expr(*rhs, env)?;
+            let lhs = type_expr(*lhs, env, name_of)?;
+            let rhs = type_expr(*rhs, env, name_of)?;
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
-            if !ty1.is_eq(&Type::INT) || !ty1.is_eq(&ty2) {
-                return Err(Error::TypeError(format!(
-                    "Can't use arithmetic operation on non-int of type {} and {}",
-                    ty1, ty2
-                )));
+            if !ty1.is_eq(&Type::INT) {
+                return Err(Error::new(ErrorKind::TypeMismatch {
+                    span: lhs.span,
+                    expected_type: Type::INT,
+                    found_type: ty1,
+                }));
+            }
+            if !ty2.is_eq(&Type::INT) {
+                return Err(Error::new(ErrorKind::TypeMismatch {
+                    span: rhs.span,
+                    expected_type: Type::INT,
+                    found_type: ty2,
+                }));
             }
             Ok(WithType::new(
                 Expr::Op {
@@ -311,8 +307,8 @@ fn type_expr(
             lhs,
             rhs,
         } => {
-            let lhs = type_expr(*lhs, env)?;
-            let rhs = type_expr(*rhs, env)?;
+            let lhs = type_expr(*lhs, env, name_of)?;
+            let rhs = type_expr(*rhs, env, name_of)?;
             let mut ty1 = lhs.ty;
             let mut ty2 = rhs.ty;
             let new_e = Expr::Op {
@@ -321,7 +317,16 @@ fn type_expr(
                 rhs: Box::new(rhs),
             };
             if ty1.is_ptr() && ty2.is_ptr() {
-                return Err(Error::TypeError("Can't add ptr together".into()));
+                return Err(Error::new(ErrorKind::BuiltinBinopTypeMismatch {
+                    left_type: ty1,
+                    right_type: ty2,
+                    span: e.span,
+                    op: "+",
+                })
+                .reason(String::from("Pointers cannot be added."))
+                .add_help(String::from(
+                    "maybe you meant to subtract the pointers?",
+                )));
             }
 
             if ty2.is_ptr() {
@@ -330,21 +335,39 @@ fn type_expr(
 
             if ty1.is_ptr() {
                 if !ty2.is_eq(&Type::INT) {
-                    return Err(Error::TypeError(
-                        "Can't add together a pointer and a non-int".into(),
+                    return Err(Error::new(
+                        ErrorKind::BuiltinBinopTypeMismatch {
+                            left_type: ty1,
+                            right_type: ty2,
+                            span: e.span,
+                            op: "+",
+                        },
                     ));
                 }
 
                 Ok(WithType::new(new_e, ty1, e.span))
             } else {
-                if !ty1.is_eq(&ty2) || !ty1.is_eq(&Type::INT) {
-                    return Err(Error::TypeError(
-                        "Can't use addition on non-integers or non-pointers"
-                            .into(),
-                    ));
+                if !ty1.is_eq(&ty2) {
+                    Err(Error::new(ErrorKind::BuiltinBinopTypeMismatch {
+                        left_type: ty1,
+                        right_type: ty2,
+                        span: e.span,
+                        op: "+",
+                    })
+                    .reason(format!(
+                        "casting between {ty1} and {ty2} is undefined"
+                    )))
+                } else if !ty1.is_eq(&Type::INT) {
+                    Err(Error::new(ErrorKind::BuiltinBinopTypeMismatch {
+                        left_type: ty1,
+                        right_type: ty2,
+                        span: e.span,
+                        op: "+",
+                    })
+                    .reason(format!("addition over `{ty1}` is undefined")))
+                } else {
+                    Ok(WithType::new(new_e, Type::INT, e.span))
                 }
-
-                Ok(WithType::new(new_e, Type::INT, e.span))
             }
         }
         Expr::Op {
@@ -352,8 +375,8 @@ fn type_expr(
             lhs,
             rhs,
         } => {
-            let lhs = type_expr(*lhs, env)?;
-            let rhs = type_expr(*rhs, env)?;
+            let lhs = type_expr(*lhs, env, name_of)?;
+            let rhs = type_expr(*rhs, env, name_of)?;
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
             let new_e = Expr::Op {
@@ -365,54 +388,64 @@ fn type_expr(
             if ty1.is_ptr() {
                 if ty2.is_ptr() {
                     if ty1 != ty2 {
-                        return Err(Error::TypeError(format!(
-                            "Can't subtract pointers of different types : {} != {}",
-                            ty1, ty2
-                        )));
+                        Err(Error::new(ErrorKind::BuiltinBinopTypeMismatch {
+                            left_type: ty1,
+                            right_type: ty2,
+                            span: e.span,
+                            op: "-",
+                        })
+                        .reason(String::from(
+                            "cannot subtract heterogeneous pointers",
+                        )))
+                    } else {
+                        Ok(WithType::new(new_e, Type::INT, e.span))
                     }
-
-                    return Ok(WithType::new(new_e, Type::INT, e.span));
+                } else if !ty2.is_eq(&Type::INT) {
+                    Err(Error::new(ErrorKind::BuiltinBinopTypeMismatch {
+                        left_type: ty1,
+                        right_type: ty2,
+                        span: e.span,
+                        op: "-",
+                    }))
+                } else {
+                    Ok(WithType::new(new_e, ty1, e.span))
                 }
-
-                if !ty2.is_eq(&Type::INT) {
-                    return Err(Error::TypeError(
-                        "Can't subtract a non-int to a pointer".into(),
-                    ));
-                }
-
-                Ok(WithType::new(new_e, ty1, e.span))
+            } else if !ty1.is_eq(&Type::INT) || !ty1.is_eq(&ty2) {
+                Err(Error::new(ErrorKind::BuiltinBinopTypeMismatch {
+                    left_type: ty1,
+                    right_type: ty2,
+                    span: e.span,
+                    op: "-",
+                }))
             } else {
-                if !ty1.is_eq(&Type::INT) || !ty1.is_eq(&ty2) {
-                    return Err(Error::TypeError(format!(
-                        "Can't subtract {} to {}",
-                        ty1, ty2
-                    )));
-                }
-
                 Ok(WithType::new(new_e, Type::INT, e.span))
             }
         }
         Expr::Call { name, args } => {
-            let (ret_ty, args_ty) = get_fun(env, name.inner)?.clone();
+            let ((ret_ty, args_ty), fun_span) =
+                get_fun(env, name.clone(), name_of)?.clone();
             if args.len() != args_ty.len() {
-                return Err(Error::TypeError(format!(
-                    "Arguments' count mismatch : expected {}, got {}",
-                    args_ty.len(),
-                    args.len()
-                )));
+                return Err(Error::new(ErrorKind::ArityMismatch {
+                    found_arity: args.len(),
+                    expected_arity: args_ty.len(),
+                    span: e.span,
+                    definition_span: fun_span.clone(),
+                    function_name: name_of[name.inner].clone(),
+                }));
             }
 
             let mut typed_args = Vec::new();
 
             for (arg, ty) in args.into_iter().zip(args_ty.iter()) {
-                let arg = type_expr(arg, env)?;
+                let arg = type_expr(arg, env, name_of)?;
                 let arg_ty = arg.ty;
 
                 if !arg_ty.is_eq(ty) {
-                    return Err(Error::TypeError(format!(
-                        "Argument type mismatch, expected {}, got {}",
-                        arg_ty, ty
-                    )));
+                    return Err(Error::new(ErrorKind::TypeMismatch {
+                        expected_type: *ty,
+                        found_type: arg_ty,
+                        span: arg.span,
+                    }));
                 }
 
                 typed_args.push(arg);
@@ -423,7 +456,7 @@ fn type_expr(
                     name,
                     args: typed_args,
                 },
-                ret_ty,
+                *ret_ty,
                 e.span,
             ))
         }
@@ -434,7 +467,8 @@ fn typecheck_instr(
     instr: WithSpan<Instr<SpanAnnotation>>,
     loop_level: usize,
     expected_return_type: Type,
-    env: &mut HashMap<Ident, Binding>,
+    env: &mut Environment,
+    name_of: &[String],
 ) -> Result<TypedInstr<Instr<TypeAnnotation>>> {
     match instr.inner {
         Instr::EmptyInstr => Ok(TypedInstr {
@@ -444,7 +478,7 @@ fn typecheck_instr(
             expected_return_type,
         }),
         Instr::ExprInstr(e) => Ok(TypedInstr {
-            instr: Instr::ExprInstr(type_expr(e, env)?),
+            instr: Instr::ExprInstr(type_expr(e, env, name_of)?),
             span: instr.span,
             loop_level,
             expected_return_type,
@@ -454,12 +488,13 @@ fn typecheck_instr(
             then_branch,
             else_branch,
         } => {
-            let cond = type_expr(cond, env)?;
+            let cond = type_expr(cond, env, name_of)?;
             let then_branch = typecheck_instr(
                 *then_branch,
                 loop_level,
                 expected_return_type,
                 env,
+                name_of,
             )?;
             let else_branch = if let Some(else_branch) = *else_branch {
                 Some(typecheck_instr(
@@ -467,32 +502,33 @@ fn typecheck_instr(
                     loop_level,
                     expected_return_type,
                     env,
+                    name_of,
                 )?)
             } else {
                 None
             };
             if cond.ty.is_eq(&Type::VOID) {
-                return Err(Error::TypeError(
-                    "The condition in an if can't be of type void".into(),
-                ));
-            }
-            if let Some(ref else_branch) = else_branch {
-                if then_branch.expected_return_type
-                    != else_branch.expected_return_type
-                {
-                    return Err(Error::TypeError(format!(
-                    "if and else branch have different return types : {} != {}",
-                    then_branch.expected_return_type,
-                    else_branch.expected_return_type
-                )));
-                }
+                return Err(Error::new(ErrorKind::VoidExpression {
+                    span: cond.span,
+                }));
             }
             if then_branch.expected_return_type != expected_return_type {
-                return Err(Error::TypeError(format!(
-                    "if statement don't return the right type, expected {}, got {}",
-                    expected_return_type,
-                    then_branch.expected_return_type
-                )));
+                return Err(Error::new(ErrorKind::TypeMismatch {
+                    span: then_branch.span,
+                    expected_type: expected_return_type,
+                    found_type: then_branch.expected_return_type,
+                })
+                .add_help(String::from("this should not happen")));
+            }
+            if let Some(ref else_branch) = else_branch {
+                if else_branch.expected_return_type != expected_return_type {
+                    return Err(Error::new(ErrorKind::TypeMismatch {
+                        span: else_branch.span.clone(),
+                        expected_type: expected_return_type,
+                        found_type: else_branch.expected_return_type,
+                    })
+                    .add_help(String::from("this should not happen")));
+                }
             }
 
             Ok(TypedInstr {
@@ -507,24 +543,26 @@ fn typecheck_instr(
             })
         }
         Instr::While { cond, body } => {
-            let cond = type_expr(cond, env)?;
+            let cond = type_expr(cond, env, name_of)?;
             let body = typecheck_instr(
                 *body,
                 loop_level + 1,
                 expected_return_type,
                 env,
+                name_of,
             )?;
             if cond.ty.is_eq(&Type::VOID) {
-                return Err(Error::TypeError(
-                    "The condition in a while can't be of type void".into(),
-                ));
+                return Err(Error::new(ErrorKind::VoidExpression {
+                    span: cond.span,
+                }));
             }
             if body.expected_return_type != expected_return_type {
-                return Err(Error::TypeError(format!(
-                    "while body don't return the right type, expected {}, got {}",
-                    expected_return_type,
-                    body.expected_return_type,
-                )));
+                return Err(Error::new(ErrorKind::TypeMismatch {
+                    expected_type: expected_return_type,
+                    found_type: body.expected_return_type,
+                    span: body.span,
+                })
+                .add_help(String::from("this should not happen")));
             }
             Ok(TypedInstr {
                 instr: Instr::While {
@@ -542,25 +580,26 @@ fn typecheck_instr(
             incr,
             body,
         } => {
-            let cond = cond.map(|cond| type_expr(cond, env)).transpose()?;
+            let cond =
+                cond.map(|cond| type_expr(cond, env, name_of)).transpose()?;
             let incr = incr
                 .into_iter()
-                .map(|incr| type_expr(incr, env))
+                .map(|incr| type_expr(incr, env, name_of))
                 .collect::<Result<Vec<_>>>()?;
             let body = Box::new(typecheck_instr(
                 *body,
                 loop_level + 1,
                 expected_return_type,
                 env,
+                name_of,
             )?);
 
             cond.as_ref()
                 .map(|cond| {
                     if cond.ty.is_eq(&Type::VOID) {
-                        return Err(Error::TypeError(
-                            "The condition in an if can't be of type void"
-                                .into(),
-                        ));
+                        Err(Error::new(ErrorKind::VoidExpression {
+                            span: cond.span.clone(),
+                        }))
                     } else {
                         Ok(())
                     }
@@ -568,22 +607,25 @@ fn typecheck_instr(
                 .transpose()?;
 
             if body.expected_return_type != expected_return_type {
-                return Err(Error::TypeError(format!(
-                    "for body don't return the right type, expected {}, got {}",
-                    expected_return_type, body.expected_return_type,
-                )));
+                Err(Error::new(ErrorKind::TypeMismatch {
+                    expected_type: expected_return_type,
+                    found_type: body.expected_return_type,
+                    span: body.span,
+                })
+                .add_help(String::from("this should not happen")))
+            } else {
+                Ok(TypedInstr {
+                    instr: Instr::For {
+                        loop_var: None,
+                        cond,
+                        incr,
+                        body,
+                    },
+                    span: instr.span,
+                    loop_level,
+                    expected_return_type,
+                })
             }
-            Ok(TypedInstr {
-                instr: Instr::For {
-                    loop_var: None,
-                    cond,
-                    incr,
-                    body,
-                },
-                span: instr.span,
-                loop_level,
-                expected_return_type,
-            })
         }
         Instr::For {
             loop_var: Some(decl),
@@ -609,53 +651,65 @@ fn typecheck_instr(
             loop_level,
             expected_return_type,
             env,
+            name_of,
         ),
         Instr::Block(block) => typecheck_block(
             WithSpan::new(block, instr.span),
             loop_level,
             expected_return_type,
             env,
+            name_of,
         ),
         Instr::Return(None) => {
             if expected_return_type != Type::VOID {
-                return Err(Error::TypeError(format!(
-                    "empty return only valid when void is expected, not {}",
+                Err(Error::new(ErrorKind::TypeMismatch {
+                    span: instr.span,
+                    expected_type: expected_return_type,
+                    found_type: Type::VOID,
+                })
+                    .reason(String::from(
+			"A `return` statement without arguments requires the current function to have a return type `void`"
+		    ))
+                    .add_help(format!("try adding an argument `return /* {expected_return_type} */;`")))
+            } else {
+                Ok(TypedInstr {
+                    instr: Instr::Return(None),
+                    span: instr.span,
+                    loop_level,
                     expected_return_type,
-                )));
+                })
             }
-            Ok(TypedInstr {
-                instr: Instr::Return(None),
-                span: instr.span,
-                loop_level,
-                expected_return_type,
-            })
         }
         Instr::Return(Some(e)) => {
-            let e = type_expr(e, env)?;
+            let e = type_expr(e, env, name_of)?;
             if !e.ty.is_eq(&expected_return_type) {
-                return Err(Error::TypeError(format!(
-                    "return type mismatch, expected {}, got {}",
-                    expected_return_type, e.ty,
-                )));
+                Err(Error::new(ErrorKind::TypeMismatch {
+                    span: instr.span,
+                    expected_type: expected_return_type,
+                    found_type: e.ty,
+                }))
+            } else {
+                Ok(TypedInstr {
+                    instr: Instr::Return(Some(e)),
+                    span: instr.span,
+                    loop_level,
+                    expected_return_type,
+                })
             }
-            Ok(TypedInstr {
-                instr: Instr::Return(Some(e)),
-                span: instr.span,
-                loop_level,
-                expected_return_type,
-            })
         }
         Instr::Break | Instr::Continue => {
             if loop_level == 0 {
-                return Err(Error::BreakContinueOutsideLoop);
+                Err(Error::new(ErrorKind::BreakContinueOutsideLoop {
+                    span: instr.span,
+                }))
+            } else {
+                Ok(TypedInstr {
+                    instr: Instr::Break,
+                    span: instr.span,
+                    loop_level,
+                    expected_return_type,
+                })
             }
-
-            Ok(TypedInstr {
-                instr: Instr::Break,
-                span: instr.span,
-                loop_level,
-                expected_return_type,
-            })
         }
     }
 }
@@ -665,25 +719,27 @@ fn typecheck_block(
     block: WithSpan<Vec<DeclOrInstr<SpanAnnotation>>>,
     loop_level: usize,
     expected_return_type: Type,
-    env: &mut HashMap<usize, Binding>,
+    env: &mut Environment,
+    name_of: &[String],
 ) -> Result<TypedInstr<Instr<TypeAnnotation>>> {
-    let mut new_bindings: Vec<(Ident, Option<Binding>)> = Vec::new();
+    let mut new_bindings: Vec<(WithSpan<Ident>, Option<Binding>)> = Vec::new();
     let mut ret = Vec::new();
 
     fn assert_var_is_not_reused(
-        var_name: Ident,
-        new_bindings: &[(usize, Option<Binding>)],
+        var_name: WithSpan<Ident>,
+        new_bindings: &[(WithSpan<Ident>, Option<Binding>)],
+        name_of: &[String],
     ) -> Result<()> {
-        if new_bindings
+        if let Some((_, first_definition_span)) = new_bindings
             .iter()
-            .map(|(name, _)| *name)
-            .find(|name| *name == var_name)
-            .is_some()
+            .map(|(WithSpan { inner, span }, _)| (*inner, span))
+            .find(|(name, _)| *name == var_name.inner)
         {
-            // TODO : add the name in the error message
-            return Err(Error::TypeError(
-                "can't assign the same name twice in the same block".into(),
-            ));
+            Err(Error::new(ErrorKind::SymbolDefinedTwice {
+                first_definition: first_definition_span.clone(),
+                second_definition: var_name.span,
+                name: name_of[var_name.inner].clone(),
+            }))
         } else {
             Ok(())
         }
@@ -693,51 +749,79 @@ fn typecheck_block(
         match decl_or_instr {
             DeclOrInstr::Fun(fun_decl) => {
                 assert_var_is_not_reused(
-                    fun_decl.inner.name.inner,
+                    fun_decl
+                        .inner
+                        .name
+                        .clone()
+                        .with_span(fun_decl.span.clone()),
                     &new_bindings,
+                    name_of,
                 )?;
-                let fun_decl = typecheck_fun(fun_decl, env)?;
+                let fun_decl = typecheck_fun(fun_decl, env, name_of)?;
                 new_bindings.push((
-                    fun_decl.inner.name.inner,
-                    env.remove(&fun_decl.inner.name.inner),
+                    fun_decl
+                        .inner
+                        .name
+                        .clone()
+                        .with_span(fun_decl.span.clone()),
+                    env.remove(&fun_decl.inner.name.inner).map(|x| x.0),
                 ));
                 ret.push(DeclOrInstr::Fun(fun_decl));
             }
             DeclOrInstr::Var(var_decl) => {
                 if var_decl.inner.ty.inner.is_eq(&Type::VOID) {
-                    // TODO : add the name in the error message
-                    return Err(Error::TypeError(
-                        "can't assign variable of void type".into(),
-                    ));
+                    return Err(Error::new(ErrorKind::VoidVariable {
+                        span: var_decl.span,
+                        name: name_of[var_decl.inner.name.inner].clone(),
+                    }));
                 }
                 assert_var_is_not_reused(
-                    var_decl.inner.name.inner,
+                    var_decl
+                        .inner
+                        .name
+                        .clone()
+                        .with_span(var_decl.span.clone()),
                     &new_bindings,
+                    name_of,
                 )?;
                 new_bindings.push((
-                    var_decl.inner.name.inner,
-                    env.remove(&var_decl.inner.name.inner),
+                    var_decl
+                        .inner
+                        .name
+                        .clone()
+                        .with_span(var_decl.span.clone()),
+                    env.remove(&var_decl.inner.name.inner).map(|x| x.0),
                 ));
                 env.insert(
                     var_decl.inner.name.inner,
-                    Binding::Var(var_decl.inner.ty.inner),
+                    (
+                        Binding::Var(var_decl.inner.ty.inner),
+                        Some(var_decl.span.clone()),
+                    ),
                 );
                 let value = var_decl
                     .inner
                     .value
-                    .map(|value| type_expr(value, env))
+                    .map(|value| type_expr(value, env, name_of))
                     .transpose()?;
 
-                if value
-                    .as_ref()
-                    .map(|val| !val.ty.is_eq(&var_decl.inner.ty.inner))
-                    .unwrap_or(false)
-                {
-                    return Err(Error::TypeError(format!(
-                        "Mismatch type on assignation, expected {}, got {}",
-                        var_decl.inner.ty.inner,
-                        value.unwrap().ty,
-                    )));
+                if let Some(ref val) = value {
+                    if !val.ty.is_eq(&var_decl.inner.ty.inner) {
+                        return Err(Error::new(
+                            ErrorKind::VariableTypeMismatch {
+                                expected_type: var_decl.inner.ty.inner,
+                                found_type: val.ty,
+                                span: val.span.clone(),
+                                definition_span: Span::extend(
+                                    var_decl.inner.ty.span,
+                                    var_decl.inner.name.span,
+                                ),
+                                variable_name: name_of
+                                    [var_decl.inner.name.inner]
+                                    .clone(),
+                            },
+                        ));
+                    }
                 }
 
                 ret.push(DeclOrInstr::Var(WithSpan::new(
@@ -749,16 +833,22 @@ fn typecheck_block(
                     var_decl.span,
                 )));
             }
-            DeclOrInstr::Instr(instr) => ret.push(DeclOrInstr::Instr(
-                typecheck_instr(instr, loop_level, expected_return_type, env)?,
-            )),
+            DeclOrInstr::Instr(instr) => {
+                ret.push(DeclOrInstr::Instr(typecheck_instr(
+                    instr,
+                    loop_level,
+                    expected_return_type,
+                    env,
+                    name_of,
+                )?))
+            }
         }
     }
     for (name, old_binding) in new_bindings {
         if let Some(binding) = old_binding {
-            env.insert(name, binding);
+            env.insert(name.inner, (binding, Some(name.span)));
         } else {
-            env.remove(&name);
+            env.remove(&name.inner);
         }
     }
 
@@ -775,7 +865,8 @@ fn typecheck_block(
 /// and saved previous value
 fn typecheck_fun(
     decl: WithSpan<FunDecl<SpanAnnotation>>,
-    env: &mut HashMap<usize, Binding>,
+    env: &mut Environment,
+    name_of: &[String],
 ) -> Result<WithSpan<FunDecl<TypeAnnotation>>> {
     let code_span = decl.inner.code.span.clone();
     let code = decl
@@ -789,17 +880,20 @@ fn typecheck_fun(
                     name: name.clone(),
                     value: None,
                 },
-                name.span.clone(),
+                Span::extend(ty.span.clone(), name.span.clone()),
             ))
         })
         .chain(decl.inner.code.inner.into_iter())
         .collect::<Vec<_>>();
     env.insert(
         decl.inner.name.inner,
-        Binding::Fun((
-            decl.inner.ty.inner,
-            decl.inner.params.iter().map(|(ty, _)| ty.inner).collect(),
-        )),
+        (
+            Binding::Fun((
+                decl.inner.ty.inner,
+                decl.inner.params.iter().map(|(ty, _)| ty.inner).collect(),
+            )),
+            Some(decl.span.clone()),
+        ),
     );
 
     let typed_instr = typecheck_block(
@@ -807,6 +901,7 @@ fn typecheck_fun(
         0,
         decl.inner.ty.inner,
         env,
+        name_of,
     )?;
 
     let Instr::Block(mut code) =
@@ -836,32 +931,42 @@ fn typecheck_fun(
 
 pub fn typecheck(
     file: File<SpanAnnotation>,
-    string_store: &[String],
+    name_of: &[String],
 ) -> Result<File<TypeAnnotation>> {
-    let main_decl = &file
+    let WithSpan {
+        inner: main_decl,
+        span: main_span,
+    } = &file
         .fun_decls
         .iter()
-        .find(|decl| string_store[decl.inner.name.inner] == "main")
-        .ok_or(Error::NoMainFunction)?
-        .inner;
+        .find(|decl| name_of[decl.inner.name.inner] == "main")
+        .ok_or(Error::new(ErrorKind::NoMainFunction))?;
     if main_decl.ty.inner != Type::INT || main_decl.params.len() != 0 {
-        return Err(Error::IncorrectMainFunctionType {
+        return Err(Error::new(ErrorKind::IncorrectMainFunctionType {
             ty: main_decl.ty.inner,
             params: main_decl.params.iter().map(|(ty, _)| ty.inner).collect(),
-        });
+            span: main_span.clone(),
+        }));
     }
 
     let mut env = HashMap::new();
-    env.insert(0, Binding::Fun((Type::VOID_PTR, vec![Type::INT])));
-    env.insert(1, Binding::Fun((Type::INT, vec![Type::INT])));
+    env.insert(0, (Binding::Fun((Type::VOID_PTR, vec![Type::INT])), None));
+    env.insert(1, (Binding::Fun((Type::INT, vec![Type::INT])), None));
     let mut fun_decls = Vec::new();
 
     for decl in file.fun_decls {
-        if get_fun(&env, decl.inner.name.inner).is_ok() {
-            // TODO : Add the function name
-            return Err(Error::TypeError("Function is already defined".into()));
+        if let Ok((_, first_definition)) = get_fun(
+            &env,
+            decl.inner.name.clone().with_span(decl.span.clone()),
+            name_of,
+        ) {
+            return Err(Error::new(ErrorKind::FunctionDefinedTwice {
+                first_definition: first_definition.clone(),
+                second_definition: decl.span,
+                name: name_of[decl.inner.name.inner].clone(),
+            }));
         }
-        fun_decls.push(typecheck_fun(decl, &mut env)?);
+        fun_decls.push(typecheck_fun(decl, &mut env, name_of)?);
     }
 
     Ok(File { fun_decls })
