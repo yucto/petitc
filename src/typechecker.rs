@@ -183,9 +183,9 @@ fn type_expr(
                 ))
             } else {
                 Err(Error::new(ErrorKind::IncrOrDecrRvalue {
-		    span: e.span,
-		    expression_span: inner_e.span,
-		}))
+                    span: e.span,
+                    expression_span: inner_e.span,
+                }))
             }
         }
         Expr::Pos(inner_e) => {
@@ -786,6 +786,21 @@ fn typecheck_block(
                         .with_span(fun_decl.span.clone()),
                     env.remove(&fun_decl.inner.name.inner).map(|x| x.0),
                 ));
+                env.insert(
+                    fun_decl.inner.name.inner,
+                    (
+                        Binding::Fun((
+                            fun_decl.inner.ty.inner,
+                            fun_decl
+                                .inner
+                                .params
+                                .iter()
+                                .map(|(ty, _)| ty.inner)
+                                .collect(),
+                        )),
+                        Some(fun_decl.span.clone()),
+                    ),
+                );
                 ret.push(DeclOrInstr::Fun(fun_decl));
             }
             DeclOrInstr::Var(var_decl) => {
