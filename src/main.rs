@@ -20,7 +20,7 @@ struct Cli {
 }
 
 fn report_error(err: Error) -> ! {
-    eprintln!("{}", err);
+    eprint!("{}", err);
     exit(1)
 }
 
