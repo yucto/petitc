@@ -1,4 +1,5 @@
-use beans::location::Span;
+use beans::span::Span;
+use colored::Colorize;
 
 use std::collections::HashMap;
 
@@ -115,7 +116,10 @@ fn type_expr(
                     WithType::new(Expr::Addr(Box::new(inner_e)), ty, e.span)
                 })
             } else {
-                Err(Error::new(ErrorKind::AddressOfRvalue { span: e.span })
+                Err(Error::new(ErrorKind::AddressOfRvalue {
+		    span: e.span,
+		    expression_span: inner_e.span,
+		})
                     .add_help(String::from("you could allocate this expression, by binding it to a variable")))
             }
         }
@@ -178,7 +182,10 @@ fn type_expr(
                     e.span,
                 ))
             } else {
-                Err(Error::new(ErrorKind::IncrOrDecrRvalue { span: e.span }))
+                Err(Error::new(ErrorKind::IncrOrDecrRvalue {
+		    span: e.span,
+		    expression_span: inner_e.span,
+		}))
             }
         }
         Expr::Pos(inner_e) => {
@@ -251,7 +258,11 @@ fn type_expr(
                     span: rhs.span,
                     expected_type: ty1,
                     found_type: ty2,
-                }))
+                })
+                .add_help(format!(
+                    "Type `{}` was expected because the expression ",
+                    format!("{}", ty1).bold()
+                )))
             } else {
                 Ok(WithType::new(
                     Expr::Op {
@@ -323,7 +334,7 @@ fn type_expr(
                     span: e.span,
                     op: "+",
                 })
-                .reason(String::from("Pointers cannot be added."))
+                .reason(String::from("pointers cannot be added."))
                 .add_help(String::from(
                     "maybe you meant to subtract the pointers?",
                 )));
@@ -395,7 +406,7 @@ fn type_expr(
                             op: "-",
                         })
                         .reason(String::from(
-                            "cannot subtract heterogeneous pointers",
+                            "heterogeneous pointers cannot be subtracted",
                         )))
                     } else {
                         Ok(WithType::new(new_e, Type::INT, e.span))
@@ -411,12 +422,18 @@ fn type_expr(
                     Ok(WithType::new(new_e, ty1, e.span))
                 }
             } else if !ty1.is_eq(&Type::INT) || !ty1.is_eq(&ty2) {
-                Err(Error::new(ErrorKind::BuiltinBinopTypeMismatch {
-                    left_type: ty1,
-                    right_type: ty2,
-                    span: e.span,
-                    op: "-",
-                }))
+                let mut error =
+                    Error::new(ErrorKind::BuiltinBinopTypeMismatch {
+                        left_type: ty1,
+                        right_type: ty2,
+                        span: e.span,
+                        op: "-",
+                    });
+                if ty1.is_eq(&Type::INT) && ty2.is_ptr() {
+                    error = error
+                        .add_help(String::from("maybe you meant to have the operands the other way around"));
+                }
+                Err(error)
             } else {
                 Ok(WithType::new(new_e, Type::INT, e.span))
             }
@@ -668,9 +685,12 @@ fn typecheck_instr(
                     found_type: Type::VOID,
                 })
                     .reason(String::from(
-			"A `return` statement without arguments requires the current function to have a return type `void`"
+			"a `return` statement without arguments requires the current function to have a return type `void`"
 		    ))
-                    .add_help(format!("try adding an argument `return /* {expected_return_type} */;`")))
+                    .add_help(format!(
+			"try adding an argument `{}`",
+			format!("return /* {expected_return_type} */;").bold())
+		    ))
             } else {
                 Ok(TypedInstr {
                     instr: Instr::Return(None),
@@ -812,10 +832,11 @@ fn typecheck_block(
                                 expected_type: var_decl.inner.ty.inner,
                                 found_type: val.ty,
                                 span: val.span.clone(),
-                                definition_span: Span::extend(
-                                    var_decl.inner.ty.span,
-                                    var_decl.inner.name.span,
-                                ),
+                                definition_span: var_decl
+                                    .inner
+                                    .ty
+                                    .span
+                                    .sup(&var_decl.inner.name.span),
                                 variable_name: name_of
                                     [var_decl.inner.name.inner]
                                     .clone(),
@@ -880,7 +901,7 @@ fn typecheck_fun(
                     name: name.clone(),
                     value: None,
                 },
-                Span::extend(ty.span.clone(), name.span.clone()),
+                ty.span.sup(&name.span),
             ))
         })
         .chain(decl.inner.code.inner.into_iter())
