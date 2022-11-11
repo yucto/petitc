@@ -1,6 +1,6 @@
 SOURCES = src/ gmrs/petitc.lx gmrs/petitc.gr Makefile Cargo.toml flake.nix
 USEFUL_ARTIFACTS = Cargo.lock flake.lock gmrs/petitc.clx gmrs/petitc.cgr
-STEP = 2b
+STEPS = 1b 2b
 ifdef RELEASE
 COMPILER = ./petitc
 else
@@ -42,7 +42,7 @@ distclean: clean
 	$(RM) $(USEFUL_ARTIFACTS)
 
 tests: $(COMPILER)
-	./run-tests -$(STEP) $(COMPILER)
+	$(foreach step,$(STEPS),./run-tests -$(step) $(COMPILER);)
 
 .PHONY: archive all clean distclean build tests target/release/petitc target/debug/petitc
 .PRECIOUS: gmrs/petitc.clx gmrs/petitc.cgr
