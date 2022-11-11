@@ -1,4 +1,4 @@
-SOURCES = src/ gmrs/petitc.lx gmrs/petitc.gr Makefile Cargo.toml flake.nix
+SOURCES = src/ gmrs/petitc.lx gmrs/petitc.gr Makefile Cargo.toml flake.nix run-tests
 USEFUL_ARTIFACTS = Cargo.lock flake.lock gmrs/petitc.clx gmrs/petitc.cgr
 STEPS = 1b 2b
 ifdef RELEASE
@@ -36,7 +36,8 @@ target/debug/petitc: src/ gmrs/petitc.clx gmrs/petitc.cgr
 	cargo build
 
 clean:
-	$(RM) -rf target/ out/
+	cargo clean
+	$(RM) -r target/ out/ ./petitc
 
 distclean: clean
 	$(RM) $(USEFUL_ARTIFACTS)
