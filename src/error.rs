@@ -1,6 +1,5 @@
 use crate::{ast::Type, cwrite, cwriteln};
 use beans::{error::Error as BeansError, span::Span};
-use colored::Colorize;
 use std::fmt;
 use thiserror::Error;
 
@@ -10,6 +9,8 @@ macro_rules! error {
 	cwriteln!($f, "<s,r!>error</><s,w!>: {}</>", string)
     }};
 }
+
+const NB_LINES_SHOWN: usize = 3;
 
 #[derive(Debug, Error)]
 pub struct Error {
@@ -61,7 +62,7 @@ impl fmt::Display for Error {
                 let span = location.get();
                 display::span(span, f)?;
                 error!(f, "the token {} cannot be recognized here", name)?;
-                display::pretty_span(span, None, None, f)?;
+                display::pretty_span(span, "^", "", "-->", f)?;
                 let alternative_message = match &alternatives[..] {
                     [] => String::from(
                         "no token would make sense here, what have you done?",
@@ -86,8 +87,9 @@ impl fmt::Display for Error {
                 error!(f, "this file is syntactically valid but incomplete")?;
                 display::pretty_span(
                     span,
-                    Some("the rest of the program is missing"),
-                    None,
+                    "^",
+                    "the rest of the program is missing",
+                    "-->",
                     f,
                 )?;
             }
@@ -95,7 +97,7 @@ impl fmt::Display for Error {
                 let span = location.get();
                 display::span(&span, f)?;
                 error!(f, "{}", message)?;
-                display::pretty_span(span, None, None, f)?;
+                display::pretty_span(span, "^", "", "-->", f)?;
             }
             ErrorKind::Beans(other) => {
                 writeln!(
@@ -115,15 +117,16 @@ impl fmt::Display for Error {
 		    ty,
 		    params.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "),
 		)?;
-                display::pretty_span(span, None, None, f)?;
+                display::pretty_span(span, "^", "", "-->", f)?;
             }
             ErrorKind::BreakContinueOutsideLoop { span } => {
                 display::span(span, f)?;
                 error!(f, "break or continue statement outside of a loop")?;
                 display::pretty_span(
                     span,
-                    Some("`break` and `continue` must be within loops"),
-                    None,
+                    "^",
+                    "`break` and `continue` must be within loops",
+                    "-->",
                     f,
                 )?;
             }
@@ -132,8 +135,9 @@ impl fmt::Display for Error {
                 error!(f, "symbol `{}` is undefined.", name)?;
                 display::pretty_span(
                     span,
-                    Some("not found in this scope"),
-                    None,
+                    "^",
+                    "not found in this scope",
+                    "-->",
                     f,
                 )?;
             }
@@ -145,8 +149,9 @@ impl fmt::Display for Error {
                 error!(f, "cannot take the address of an rvalue expression")?;
                 display::pretty_span(
                     expression_span,
-                    Some("this expression has no address in memory"),
-                    None,
+                    "^",
+                    "this expression has no address in memory",
+                    "-->",
                     f,
                 )?;
             }
@@ -155,8 +160,9 @@ impl fmt::Display for Error {
                 error!(f, "cannot cast `{}` as `_*`", ty)?;
                 display::pretty_span(
                     span,
-                    Some("this is not a pointer, it cannot be dereferenced"),
-                    None,
+                    "^",
+                    "this is not a pointer, it cannot be dereferenced",
+                    "-->",
                     f,
                 )?;
             }
@@ -170,19 +176,11 @@ impl fmt::Display for Error {
                     f,
                     "the symbol `{}` is defined twice in the same block", name,
                 )?;
-                display::pretty_span(
+                display::pretty_span_hint(
                     second_definition,
-                    Some("second definition found here"),
-                    None,
-                    f,
-                )?;
-                cwrite!(f, "The first definition was found ")?;
-                display::relative_span(first_definition, second_definition, f)?;
-                writeln!(f)?;
-                display::pretty_span(
+                    "second definition found here",
                     first_definition,
-                    Some("first definition found here"),
-                    None,
+                    "first_definition_found_here",
                     f,
                 )?;
             }
@@ -198,23 +196,33 @@ impl fmt::Display for Error {
 		    f,
 		    "arity mismatch between this function call and its definition.",
 		)?;
-                display::pretty_span(
-                    span,
-                    Some("not the right number of arguments"),
-                    None,
-                    f,
-                )?;
-                cwriteln!(
-                    f,
-                    "  <s,b!>=</> <s,w!>note: {} arguments were expected, but {} were given</>",
-                    expected_arity, found_arity
-                )?;
-                display::help_function_definitions(
-                    definition_span,
-                    span,
-                    &function_name,
-                    f,
-                )?;
+
+                if let Some(definition_span) = definition_span {
+                    display::pretty_span_hint(
+                        span,
+                        format!("found {} arguments", found_arity),
+                        definition_span,
+                        format!("expected {} arguments", expected_arity),
+                        f,
+                    )?;
+                } else {
+                    display::pretty_span(
+                        span,
+                        "^",
+                        format!("found {} arguments", found_arity),
+                        "-->",
+                        f,
+                    )?;
+                    let nb_line_length =
+                        (span.end().0 + 1).to_string().len().max(3);
+                    cwriteln!(
+                        f,
+                        "{} <s,b!>=</> <s,w!>note:</> `{}` is a builtin function which takes {} arguments",
+                        " ".repeat(nb_line_length),
+			function_name,
+			expected_arity,
+                    )?;
+                }
             }
             ErrorKind::FunctionDefinedTwice {
                 first_definition,
@@ -226,24 +234,31 @@ impl fmt::Display for Error {
                     f,
                     "the symbol `{}` is defined twice at the toplevel", name
                 )?;
-                display::pretty_span(
-                    second_definition,
-                    Some("second definition found here"),
-                    None,
-                    f,
-                )?;
-                display::help_function_definitions(
-                    first_definition,
-                    second_definition,
-                    &name,
-                    f,
-                )?;
                 if let Some(first_definition) = first_definition {
-                    display::pretty_span(
+                    display::pretty_span_hint(
+                        second_definition,
+                        "second definition found here",
                         first_definition,
-                        Some("first definition found here"),
-                        None,
+                        "first definition found here",
                         f,
+                    )?;
+                } else {
+                    display::pretty_span(
+                        second_definition,
+                        "^",
+                        "definition found here",
+                        "-->",
+                        f,
+                    )?;
+                    let nb_line_length = (second_definition.end().0 + 1)
+                        .to_string()
+                        .len()
+                        .max(3);
+                    cwriteln!(
+                        f,
+                        "{} <s,b!>=</> <s,w!>note:</> `{}` is a builtin function",
+                        " ".repeat(nb_line_length),
+			name,
                     )?;
                 }
             }
@@ -255,8 +270,9 @@ impl fmt::Display for Error {
                 )?;
                 display::pretty_span(
                     span,
-                    Some("`void` is not a valid type for a variable"),
-                    None,
+                    "^",
+                    "`void` is not a valid type for a variable",
+                    "-->",
                     f,
                 )?;
             }
@@ -275,11 +291,13 @@ impl fmt::Display for Error {
 		    expected_type,
 		    found_type,
 		)?;
-                display::pretty_span(span, None, None, f)?;
-                write!(f, "  help: `{}` was defined ", variable_name.bold())?;
-                display::relative_span(definition_span, span, f)?;
-                writeln!(f)?;
-                display::pretty_span(definition_span, None, None, f)?;
+                display::pretty_span_hint(
+                    span,
+                    "",
+                    definition_span,
+                    format!("`{}` is defined here", variable_name),
+                    f,
+                )?;
             }
             ErrorKind::VoidExpression { span } => {
                 display::span(span, f)?;
@@ -287,7 +305,7 @@ impl fmt::Display for Error {
                     f,
                     "this expression has type `void`, which is forbidden",
                 )?;
-                display::pretty_span(span, None, None, f)?;
+                display::pretty_span(span, "^", "", "-->", f)?;
                 cwriteln!(
 		    f,
 		    "  <s,b!>=</> <s,w!>note:</> expressions with type `void` can only be discarded"
@@ -296,7 +314,7 @@ impl fmt::Display for Error {
             ErrorKind::SizeofVoid { span } => {
                 display::span(span, f)?;
                 error!(f, "`void` does not have a size",)?;
-                display::pretty_span(span, None, None, f)?;
+                display::pretty_span(span, "^", "", "-->", f)?;
                 cwriteln!(f, "  <s,b!>=</> <s,w!>hint: <i>use gcc!</></>")?;
             }
             ErrorKind::RvalueAssignment { span } => {
@@ -307,8 +325,9 @@ impl fmt::Display for Error {
 		)?;
                 display::pretty_span(
                     span,
-                    Some("cannot assign to this expression"),
-                    None,
+                    "^",
+                    "cannot assign to this expression",
+                    "-->",
                     f,
                 )?;
             }
@@ -324,7 +343,7 @@ impl fmt::Display for Error {
                     expected_type,
                     found_type,
                 )?;
-                display::pretty_span(span, Some("wrong type"), None, f)?;
+                display::pretty_span(span, "^", "wrong type", "-->", f)?;
             }
             ErrorKind::IncrOrDecrRvalue {
                 span,
@@ -334,8 +353,9 @@ impl fmt::Display for Error {
                 error!(f, "only <i>lvalue</> expressions can be mutated")?;
                 display::pretty_span(
                     expression_span,
-                    Some("cannot mutate this expression"),
-                    None,
+                    "^",
+                    "cannot mutate this expression",
+                    "-->",
                     f,
                 )?;
             }
@@ -355,8 +375,9 @@ impl fmt::Display for Error {
                 )?;
                 display::pretty_span(
                     span,
-                    Some("invalid arithmetic operation"),
-                    None,
+                    "^",
+                    "invalid arithmetic operation",
+                    "-->",
                     f,
                 )?;
             }
@@ -459,7 +480,11 @@ mod display {
     use super::*;
 
     pub fn span(span: &Span, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "File \"{}\", ", span.file().display())?;
+        write!(
+            f,
+            "File \"{}\", ",
+            span.file().file_name().unwrap().to_str().unwrap()
+        )?;
         locations(span.start(), span.end(), f)?;
         write!(f, ":\n")
     }
@@ -491,14 +516,16 @@ mod display {
     pub fn single_line(
         span: &Span,
         left_column_size: usize,
+        padding: impl fmt::Display,
         line_nb: usize,
         f: &mut fmt::Formatter,
     ) -> fmt::Result {
         let (line_begins_at, line_ends_at) = span.line_bytes_of_line(line_nb);
         left_column_with(left_column_size, line_nb + 1, f)?;
-        writeln!(
+        cwriteln!(
             f,
-            "{}",
+            "<s,r!>{}</>{}",
+            padding,
             span.text()[line_begins_at..line_ends_at].trim_end(),
         )
     }
@@ -534,12 +561,14 @@ mod display {
     pub fn error_report(
         span: &Span,
         left_column_size: usize,
+        arrow: impl fmt::Display,
         f: &mut fmt::Formatter,
     ) -> fmt::Result {
         cwriteln!(
             f,
-            "{}<s,b!>--></> {}:{}:{}",
+            "{}<s,b!>{}</> {}:{}:{}",
             " ".repeat(left_column_size),
+            arrow,
             span.file().file_name().unwrap().to_str().unwrap(),
             span.start().0 + 1,
             span.start().1,
@@ -549,132 +578,104 @@ mod display {
     pub fn comment(
         underline_filler: &'static str,
         offset: usize,
+        padding: impl fmt::Display,
+        offset_char: &'static str,
         length: usize,
         left_column_size: usize,
-        message: Option<&'static str>,
+        message: impl fmt::Display,
         f: &mut fmt::Formatter,
     ) -> fmt::Result {
         left_column(left_column_size, f)?;
         cwriteln!(
             f,
-            "{}<s,r!>{} {}</>",
-            " ".repeat(offset),
+            "<s,r!>{}{}</><s,r!><s,r!>{}</> {}</>",
+            padding,
+            offset_char.repeat(offset),
             underline_filler.repeat(length),
-            message.unwrap_or_default(),
+            message,
         )
     }
 
-    pub fn pretty_span(
+    pub fn pretty_span_hint(
         span: &Span,
-        message: Option<&'static str>,
-        _hint: Option<(&Span, &'static str)>,
+        message: impl fmt::Display,
+        hint_span: &Span,
+        hint_message: impl fmt::Display,
         f: &mut fmt::Formatter,
     ) -> fmt::Result {
-        if span.start().0 == span.end().0 {
-            let left_column_size = (span.start().0 + 1).to_string().len();
-            let reported_length = span.end().1 - span.start().1 + 1;
-            error_report(span, left_column_size, f)?;
-            left_column_newline(left_column_size, f)?;
-            single_line(span, left_column_size, span.start().0, f)?;
-            comment(
-                "^",
-                span.start_byte() - span.lines()[span.start().0],
-                reported_length,
-                left_column_size,
-                message,
-                f,
-            )?;
-            left_column_newline(left_column_size, f)?;
-        } else if span.end().0 - span.start().0 <= 3 {
-            let left_column_size = (span.end().0 + 1).to_string().len();
-            error_report(span, left_column_size, f)?;
-            left_column_newline(left_column_size, f)?;
-            single_line(span, left_column_size, span.start().0, f)?;
-            comment(
-                "^",
-                span.start_byte() - span.lines()[span.start().0],
-                1,
-                left_column_size,
-                None,
-                f,
-            )?;
-            for line in span.start().0 + 1..span.end().0 {
-                single_line(span, left_column_size, line, f)?;
-            }
-            single_line(span, left_column_size, span.end().0, f)?;
-            comment(
-                "^",
-                span.end_byte() - span.lines()[span.end().0],
-                1,
-                left_column_size,
-                message,
-                f,
-            )?;
-            left_column_newline(left_column_size, f)?;
+        if hint_span.end() <= span.start() {
+            pretty_span(hint_span, "~", hint_message, "-->", f)?;
+            pretty_span(span, "^", message, ":::", f)?;
         } else {
-            todo!()
+            pretty_span(span, "^", message, "-->", f)?;
+            pretty_span(hint_span, "~", hint_message, ":::", f)?;
         }
         Ok(())
     }
 
-    pub fn relative_span(
+    pub fn pretty_span(
         span: &Span,
-        parent: &Span,
+        underline: &'static str,
+        message: impl fmt::Display,
+        arrow: impl fmt::Display,
         f: &mut fmt::Formatter,
     ) -> fmt::Result {
-        if span.file() == parent.file() {
-            if span.start().0 == span.end().0
-                && parent.start().0 == parent.end().0
-                && span.start().0 == parent.start().0
-            {
-                write!(f, "at the same line, ")?;
+        let left_column_size = (span.start().0 + 1).to_string().len().max(3);
+        error_report(span, left_column_size, arrow, f)?;
+        left_column_newline(left_column_size, f)?;
+        if span.start().0 != span.end().0 {
+            single_line(span, left_column_size, "  ", span.start().0, f)?;
+            comment(
+                underline,
+                span.start_byte() - span.lines()[span.start().0],
+                " _",
+                "_",
+                1,
+                left_column_size,
+                "",
+                f,
+            )?;
+
+            if span.end().0 - span.start().0 <= 2 * NB_LINES_SHOWN {
+                for line in span.start().0 + 1..span.end().0 {
+                    single_line(span, left_column_size, "| ", line, f)?;
+                }
             } else {
-                write!(f, "in the same file, ")?;
-                if span.start().0 == span.end().0 {
-                    write!(f, "line {}, ", span.start().0 + 1)?;
-                } else {
-                    write!(
-                        f,
-                        "lines {}-{}",
-                        span.start().0 + 1,
-                        span.end().0 + 1
-                    )?;
+                for line in span.start().0 + 1..span.start().0 + NB_LINES_SHOWN
+                {
+                    single_line(span, left_column_size, "| ", line, f)?;
+                }
+                left_column_with(left_column_size, "...", f)?;
+                cwriteln!(f, "<s,r!>|</> ")?;
+                for line in span.end().0 - NB_LINES_SHOWN..span.end().0 {
+                    single_line(span, left_column_size, "| ", line, f)?;
                 }
             }
-            if span.start().0 == span.end().0
-                && span.end().1 - span.start().1 <= 1
-            {
-                write!(f, "character {}", span.start().1)
-            } else {
-                write!(f, "characters {}-{}", span.start().1, span.end().1)
-            }
-        } else {
-            write!(f, "in file \"{}\", ", span.file().display())?;
-            locations(span.start(), span.end(), f)
-        }
-    }
-
-    pub fn help_function_definitions(
-        first_span: &Option<Span>,
-        second_span: &Span,
-        function_name: &str,
-        f: &mut fmt::Formatter,
-    ) -> fmt::Result {
-        if let Some(def_span) = first_span {
-            cwrite!(
+            single_line(span, left_column_size, "| ", span.end().0, f)?;
+            comment(
+                underline,
+                span.end_byte() - span.lines()[span.end().0],
+                " -",
+                "-",
+                1,
+                left_column_size,
+                message,
                 f,
-                "  <s,b!>=</> <s,w!>help:</> `{}` was defined ",
-                function_name
             )?;
-            relative_span(def_span, second_span, f)?;
         } else {
-            cwrite!(
+            single_line(span, left_column_size, "", span.start().0, f)?;
+            comment(
+                underline,
+                span.start_byte() - span.lines()[span.start().0],
+                "",
+                " ",
+                span.end().1 - span.start().1 + 1,
+                left_column_size,
+                message,
                 f,
-                "  <s,b!>=</> <s,w!>help:</> `{}` is a builtin function",
-                function_name
             )?;
         }
-        writeln!(f)
+        Ok(())
     }
 }
 
