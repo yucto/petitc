@@ -9,7 +9,7 @@ use crate::error::Result;
 
 use beans::error::WarningSet;
 use beans::include_parser;
-use beans::location::Span;
+use beans::span::Span;
 use beans::parser::{Parser, Value, AST};
 use beans::stream::StringStream;
 
