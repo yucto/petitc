@@ -7,6 +7,7 @@ pub mod ast;
 pub mod error;
 mod parsing;
 mod typechecker;
+mod color;
 
 pub fn parse(
     p: impl AsRef<Path>,
