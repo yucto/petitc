@@ -51,17 +51,51 @@ where
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let helps: &mut dyn Iterator<Item = _> = &mut self.helps.iter();
+        let mut helps = self.helps.clone();
         match &self.kind {
-            ErrorKind::Beans(BeansError::SyntaxError { message, location }) => {
+            ErrorKind::Beans(BeansError::SyntaxError {
+                name,
+                alternatives,
+                location,
+            }) => {
                 let span = location.get();
                 display::span(span, f)?;
-                writeln!(f, "Syntax error: {}", message)?;
+                error!(f, "the token {} cannot be recognized here", name)?;
+                display::pretty_span(span, None, None, f)?;
+                let alternative_message = match &alternatives[..] {
+                    [] => String::from(
+                        "no token would make sense here, what have you done?",
+                    ),
+                    [alternative] => {
+                        format!("you should use {alternative} instead")
+                    }
+                    [starts @ .., last] => {
+                        format!(
+                            "the tokens {} or {last} would make sense here",
+                            starts.join(", ")
+                        )
+                    }
+                };
+                helps.push(alternative_message);
+            }
+            ErrorKind::Beans(BeansError::SyntaxErrorValidPrefix {
+                location,
+            }) => {
+                let span = location.get();
+                display::span(span, f)?;
+                error!(f, "this file is syntactically valid but incomplete")?;
+                display::pretty_span(
+                    span,
+                    Some("the rest of the program is missing"),
+                    None,
+                    f,
+                )?;
             }
             ErrorKind::Beans(BeansError::LexingError { message, location }) => {
                 let span = location.get();
                 display::span(&span, f)?;
-                writeln!(f, "Lexing error: {}", message)?;
+                error!(f, "{}", message)?;
+                display::pretty_span(span, None, None, f)?;
             }
             ErrorKind::Beans(other) => {
                 writeln!(
@@ -274,7 +308,7 @@ impl fmt::Display for Error {
                 display::pretty_span(
                     span,
                     Some("cannot assign to this expression"),
-		    None,
+                    None,
                     f,
                 )?;
             }
@@ -301,7 +335,7 @@ impl fmt::Display for Error {
                 display::pretty_span(
                     expression_span,
                     Some("cannot mutate this expression"),
-		    None,
+                    None,
                     f,
                 )?;
             }
@@ -322,7 +356,7 @@ impl fmt::Display for Error {
                 display::pretty_span(
                     span,
                     Some("invalid arithmetic operation"),
-		    None,
+                    None,
                     f,
                 )?;
             }
