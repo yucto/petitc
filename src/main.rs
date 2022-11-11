@@ -98,7 +98,7 @@ fn panic_hook(info: &std::panic::PanicInfo<'_>) {
     // Current implementation always returns the Some variant
     let location = if let Some(loc) = info.location() {
         Cow::Owned(format!(
-            "File \"{}\", line {}, characters {}-{2}:",
+            "File \"{}\", line {}, character {}:",
             loc.file(),
             loc.line(),
             loc.column()
