@@ -486,7 +486,7 @@ mod display {
             span.file().file_name().unwrap().to_str().unwrap()
         )?;
         locations(span.start(), span.end(), f)?;
-        write!(f, ":\n")
+        writeln!(f, ":")
     }
 
     pub fn locations(
