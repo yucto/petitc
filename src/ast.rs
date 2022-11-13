@@ -185,10 +185,7 @@ pub enum Expr<A: Annotation> {
 
 impl<A: Annotation> Expr<A> {
     pub const fn is_lvalue(&self) -> bool {
-        match self {
-            Expr::Ident(_) | Expr::Deref(_) => true,
-            _ => false,
-        }
+	matches!(self, Expr::Ident(_) | Expr::Deref(_))
     }
 }
 
