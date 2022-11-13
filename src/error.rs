@@ -14,7 +14,7 @@ const NB_LINES_SHOWN: usize = 3;
 
 #[derive(Debug, Error)]
 pub struct Error {
-    kind: ErrorKind,
+    kind: Box<ErrorKind>,
     reason: Option<String>,
     helps: Vec<String>,
 }
@@ -34,7 +34,7 @@ impl Error {
 
     pub(crate) fn new(kind: ErrorKind) -> Self {
         Error {
-            kind,
+            kind: Box::new(kind),
             reason: None,
             helps: Vec::new(),
         }
@@ -53,7 +53,7 @@ where
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut helps = self.helps.clone();
-        match &self.kind {
+        match &*self.kind {
             ErrorKind::Beans(BeansError::SyntaxError {
                 name,
                 alternatives,
