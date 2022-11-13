@@ -439,7 +439,7 @@ fn type_expr(
         }
         Expr::Call { name, args } => {
             let ((ret_ty, args_ty), fun_span) =
-                get_fun(env, name.clone(), name_of)?.clone();
+                get_fun(env, name.clone(), name_of)?;
             if args.len() != args_ty.len() {
                 return Err(Error::new(ErrorKind::ArityMismatch {
                     found_arity: args.len(),
