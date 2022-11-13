@@ -95,7 +95,7 @@ impl fmt::Display for Error {
             }
             ErrorKind::Beans(BeansError::LexingError { message, location }) => {
                 let span = location.get();
-                display::span(&span, f)?;
+                display::span(span, f)?;
                 error!(f, "{}", message)?;
                 display::pretty_span(span, "^", "", "-->", f)?;
             }
