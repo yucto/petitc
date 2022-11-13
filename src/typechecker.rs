@@ -975,8 +975,8 @@ pub fn typecheck(
         .fun_decls
         .iter()
         .find(|decl| name_of[decl.inner.name.inner] == "main")
-        .ok_or(Error::new(ErrorKind::NoMainFunction))?;
-    if main_decl.ty.inner != Type::INT || main_decl.params.len() != 0 {
+        .ok_or_else(|| Error::new(ErrorKind::NoMainFunction))?;
+    if main_decl.ty.inner != Type::INT || !main_decl.params.is_empty() {
         return Err(Error::new(ErrorKind::IncorrectMainFunctionType {
             ty: main_decl.ty.inner,
             params: main_decl.params.iter().map(|(ty, _)| ty.inner).collect(),
