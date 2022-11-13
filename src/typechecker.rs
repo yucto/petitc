@@ -334,10 +334,10 @@ fn type_expr(
                     span: e.span,
                     op: "+",
                 })
-                .reason(String::from("pointers cannot be added."))
-                .add_help(String::from(
-                    "maybe you meant to subtract the pointers?",
-                )));
+			   .reason(String::from("pointers cannot be added."))
+			   .add_help(String::from(
+			       "maybe you meant to subtract the pointers?",
+			   )));
             }
 
             if ty2.is_ptr() {
@@ -357,29 +357,28 @@ fn type_expr(
                 }
 
                 Ok(WithType::new(new_e, ty1, e.span))
-            } else {
-                if !ty1.is_eq(&ty2) {
-                    Err(Error::new(ErrorKind::BuiltinBinopTypeMismatch {
-                        left_type: ty1,
-                        right_type: ty2,
-                        span: e.span,
-                        op: "+",
-                    })
+            } else if !ty1.is_eq(&ty2) {
+                Err(Error::new(ErrorKind::BuiltinBinopTypeMismatch {
+                    left_type: ty1,
+                    right_type: ty2,
+                    span: e.span,
+                    op: "+",
+                })
                     .reason(format!(
                         "casting between {ty1} and {ty2} is undefined"
                     )))
-                } else if !ty1.is_eq(&Type::INT) {
-                    Err(Error::new(ErrorKind::BuiltinBinopTypeMismatch {
-                        left_type: ty1,
-                        right_type: ty2,
-                        span: e.span,
-                        op: "+",
-                    })
+            } else if !ty1.is_eq(&Type::INT) {
+                Err(Error::new(ErrorKind::BuiltinBinopTypeMismatch {
+                    left_type: ty1,
+                    right_type: ty2,
+                    span: e.span,
+                    op: "+",
+                })
                     .reason(format!("addition over `{ty1}` is undefined")))
-                } else {
-                    Ok(WithType::new(new_e, Type::INT, e.span))
-                }
+            } else {
+                Ok(WithType::new(new_e, Type::INT, e.span))
             }
+            
         }
         Expr::Op {
             op: BinOp::Sub,
