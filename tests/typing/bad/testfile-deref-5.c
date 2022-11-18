@@ -2,6 +2,4 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-void putchar() {}
-int main() {}
-
+int main() { void *p; *p; }

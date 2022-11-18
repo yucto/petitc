@@ -3,4 +3,3 @@
 #include <stdio.h>
 
 int main() { int *p; bool *q; putchar(p-q); }
-

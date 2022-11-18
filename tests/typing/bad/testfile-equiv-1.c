@@ -1,5 +1,4 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
-void foo() {}
-int main() { 1 < foo(); }
+int main() { int x; bool *p = &x; }
