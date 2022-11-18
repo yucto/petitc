@@ -128,11 +128,17 @@ fn type_expr(
                 let mut ty = inner_e.ty;
                 if ty.is_ptr() {
                     ty.indirection_count -= 1;
-                    Ok(WithType::new(
-                        Expr::Deref(Box::new(inner_e)),
-                        ty,
-                        e.span,
-                    ))
+		    if ty.is_eq(&Type::VOID) {
+			Err(Error::new(ErrorKind::DerefVoidPointer {
+			    span: inner_e.span,
+			}))
+		    } else {
+			Ok(WithType::new(
+                            Expr::Deref(Box::new(inner_e)),
+                            ty,
+                            e.span,
+			))
+		    }
                 } else {
                     Err(Error::new(ErrorKind::DerefNonPointer {
                         ty,
@@ -253,7 +259,11 @@ fn type_expr(
             let rhs = type_expr(*rhs, env, name_of)?;
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
-            if !ty1.is_eq(&ty2) {
+	    if ty1.is_eq(&Type::VOID) {
+		Err(Error::new(ErrorKind::VoidExpression { span: lhs.span, }))
+	    } else if ty2.is_eq(&Type::VOID) {
+		Err(Error::new(ErrorKind::VoidExpression { span: rhs.span, }))
+            } else if !ty1.is_eq(&ty2) {
                 Err(Error::new(ErrorKind::TypeMismatch {
                     span: rhs.span,
                     expected_type: ty1,

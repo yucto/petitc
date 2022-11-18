@@ -299,6 +299,15 @@ impl fmt::Display for Error {
                     f,
                 )?;
             }
+            ErrorKind::DerefVoidPointer { span } => {
+                display::span(span, f)?;
+                error!(f, "`void*` cannot be dereferenced",)?;
+                display::pretty_span(span, "^", "", "-->", f)?;
+                cwriteln!(
+		    f,
+		    "  <s,b!>=</> <s,w!>help:</> try casting this value to an other pointer type before dereferencing it",
+		)?;
+            }
             ErrorKind::VoidExpression { span } => {
                 display::span(span, f)?;
                 error!(
@@ -438,6 +447,9 @@ pub enum ErrorKind {
         name: String,
     },
     VoidExpression {
+        span: Span,
+    },
+    DerefVoidPointer {
         span: Span,
     },
     VariableTypeMismatch {
