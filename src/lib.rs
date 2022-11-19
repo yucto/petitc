@@ -33,6 +33,6 @@ pub fn typecheck(
 pub fn compile(
     _p: impl AsRef<Path>,
     _: ast::File<typechecker::TypeAnnotation>,
-) -> Result<()> {
+) -> () {
     unimplemented!()
 }

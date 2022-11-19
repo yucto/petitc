@@ -111,7 +111,7 @@ impl Annotation for SpanAnnotation {
     type WrapElseBranch<T> = Option<WithSpan<T>>;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct WithSpan<T> {
     pub inner: T,
     pub span: Span,
@@ -131,11 +131,18 @@ impl<T> WithSpan<T> {
         Self { inner, span }
     }
 
-    pub fn map<U>(self, f: impl Fn(T) -> U) -> WithSpan<U> {
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> WithSpan<U> {
         WithSpan {
             inner: f(self.inner),
             span: self.span,
         }
+    }
+
+    pub fn map_opt<U>(self, f: impl FnOnce(T) -> Option<U>) -> Option<WithSpan<U>> {
+	Some(WithSpan {
+	    inner: f(self.inner)?,
+	    span: self.span,
+	})
     }
 
     pub fn with_span(self, span: Span) -> Self {

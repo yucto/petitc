@@ -1,3 +1,5 @@
+use core::fmt;
+
 use crate::typing::Type;
 
 /// All strings are represented by an index in a Vec<String>
@@ -84,7 +86,7 @@ pub enum Expr<A: Annotation> {
 
 impl<A: Annotation> Expr<A> {
     pub const fn is_lvalue(&self) -> bool {
-	matches!(self, Expr::Ident(_) | Expr::Deref(_))
+        matches!(self, Expr::Ident(_) | Expr::Deref(_))
     }
 }
 

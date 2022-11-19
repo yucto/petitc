@@ -19,8 +19,10 @@ struct Cli {
     type_only: bool,
 }
 
-fn report_error(err: Error) -> ! {
-    eprint!("{}", err);
+fn report_errors(errs: Vec<Error>) -> ! {
+    for err in errs {
+	eprint!("{}", err);
+    }
     exit(1)
 }
 
@@ -64,23 +66,20 @@ fn main() -> ExitCode {
     }
 
     let (parsed, string_store) =
-        petitc::parse(&args.path).map_err(report_error).unwrap();
+        petitc::parse(&args.path).map_err(|err| report_errors(vec![err])).unwrap();
 
     if args.parse_only {
         return ExitCode::from(0);
     }
 
     let typed = petitc::typecheck(&args.path, parsed, &string_store)
-        .map_err(report_error)
+        .map_err(report_errors)
         .unwrap();
-
     if args.type_only {
         return ExitCode::from(0);
     }
 
-    let _ = petitc::compile(&args.path, typed)
-        .map_err(report_error)
-        .unwrap();
+    petitc::compile(&args.path, typed);
 
     ExitCode::from(0)
 }

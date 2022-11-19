@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::{
     error::ErrorKind,
-    typing::{BasisTypable, Type, BasisType},
+    typing::{BasisTypable, BasisType, Type},
 };
 
 use super::{
@@ -30,7 +30,7 @@ fn get_errors() -> Vec<Error> {
 pub(crate) type PartialType = Type<PartialBasisType>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum PartialBasisType {
+pub enum PartialBasisType {
     Void,
     Int,
     Bool,
@@ -43,32 +43,36 @@ impl BasisTypable for PartialBasisType {
     const BOOL: Self = Self::Bool;
 
     fn is_eq(left: &Type<Self>, right: &Type<Self>) -> bool {
-        if left.is_ptr() {
-            (right.is_ptr()
-                && ((left.indirection_count == 1 && left.basis == Self::Void)
-                    || (right.indirection_count == 1
-                        && right.basis == Self::Void)))
-                || right.basis == Self::Error
-        } else {
-            matches!(
-                (left.basis, right.basis),
-                (Self::Error, _)
-                    | (_, Self::Error)
-                    | (Self::Int, Self::Int)
-                    | (Self::Bool, Self::Int)
-                    | (Self::Int, Self::Bool)
-                    | (Self::Bool, Self::Bool)
-                    | (Self::Void, Self::Void)
-            )
-        }
+        left == right
+            || if left.is_ptr() {
+                (right.is_ptr()
+                    && ((left.indirection_count == 1
+                        && left.basis == Self::Void)
+                        || (right.indirection_count == 1
+                            && right.basis == Self::Void)))
+                    || right.basis == Self::Error
+            } else if right.is_ptr() {
+                left.basis == Self::Error
+            } else {
+                matches!(
+                    (left.basis, right.basis),
+                    (Self::Error, _)
+                        | (_, Self::Error)
+                        | (Self::Int, Self::Int)
+                        | (Self::Bool, Self::Int)
+                        | (Self::Int, Self::Bool)
+                        | (Self::Bool, Self::Bool)
+                        | (Self::Void, Self::Void)
+                )
+            }
     }
     fn to_basic(self) -> Option<BasisType> {
-	match self {
-	    Self::Bool => Some(BasisType::Bool),
-	    Self::Int => Some(BasisType::Int),
-	    Self::Void => Some(BasisType::Void),
-	    _ => None,
-	}
+        match self {
+            Self::Bool => Some(BasisType::Bool),
+            Self::Int => Some(BasisType::Int),
+            Self::Void => Some(BasisType::Void),
+            _ => None,
+        }
     }
 }
 
@@ -83,7 +87,8 @@ impl fmt::Display for PartialBasisType {
     }
 }
 
-struct PartialTypeAnnotation;
+#[derive(Debug)]
+pub struct PartialTypeAnnotation;
 
 impl Annotation for PartialTypeAnnotation {
     type Ident = WithSpan<Ident>;
@@ -101,12 +106,7 @@ impl File<PartialTypeAnnotation> {
             fun_decls: self
                 .fun_decls
                 .into_iter()
-                .map(|ws| {
-                    Some(WithSpan {
-                        inner: ws.inner.to_full()?,
-                        span: ws.span,
-                    })
-                })
+                .map(|ws| ws.map_opt(|inner| inner.to_full()))
                 .collect::<Option<_>>()?,
         })
     }
@@ -114,31 +114,184 @@ impl File<PartialTypeAnnotation> {
 
 impl FunDecl<PartialTypeAnnotation> {
     fn to_full(self) -> Option<FunDecl<TypeAnnotation>> {
-        todo!()
+        let TypedInstr {
+            instr,
+            span,
+            loop_level,
+            expected_return_type,
+        } = self.code;
+        Some(FunDecl {
+            ty: self.ty.to_full()?,
+            name: self.name,
+            params: self
+                .params
+                .into_iter()
+                .map(|(arg_ty, arg)| Some((arg_ty.to_full()?, arg)))
+                .collect::<Option<_>>()?,
+            code: TypedInstr {
+                instr: instr
+                    .into_iter()
+                    .map(|decl_instr| decl_instr.to_full())
+                    .collect::<Option<_>>()?,
+                span,
+                loop_level,
+                expected_return_type: expected_return_type.to_basic()?,
+            },
+            toplevel: self.toplevel,
+        })
     }
 }
 
 impl DeclOrInstr<PartialTypeAnnotation> {
     fn to_full(self) -> Option<DeclOrInstr<TypeAnnotation>> {
-        todo!()
+        Some(match self {
+            Self::Fun(fun) => {
+                DeclOrInstr::Fun(fun.map_opt(|fun_decl| fun_decl.to_full())?)
+            }
+            Self::Var(var) => {
+                DeclOrInstr::Var(var.map_opt(|var_decl| var_decl.to_full())?)
+            }
+            Self::Instr(instr) => DeclOrInstr::Instr(TypedInstr {
+                instr: instr.instr.to_full()?,
+                span: instr.span,
+                loop_level: instr.loop_level,
+                expected_return_type: instr.expected_return_type.to_basic()?,
+            }),
+        })
     }
 }
 
 impl VarDecl<PartialTypeAnnotation> {
     fn to_full(self) -> Option<VarDecl<TypeAnnotation>> {
-        todo!()
+        Some(VarDecl {
+            ty: self.ty.to_full()?,
+            name: self.name,
+            value: if let Some(val) = self.value {
+                let new_val = val.to_full()?;
+                new_val.map_opt(|inner| inner.to_full())
+            } else {
+                None
+            },
+        })
     }
 }
 
 impl Expr<PartialTypeAnnotation> {
     fn to_full(self) -> Option<Expr<TypeAnnotation>> {
-        todo!()
+        Some(match self {
+            Expr::Int(i) => Expr::Int(i),
+            Expr::True => Expr::True,
+            Expr::False => Expr::False,
+            Expr::Null => Expr::Null,
+            Expr::Ident(ident) => Expr::Ident(ident),
+            Expr::Deref(expr) => {
+                Expr::Deref(Box::new(expr.to_full()?.map_opt(|e| e.to_full())?))
+            }
+            Expr::Assign { lhs, rhs } => Expr::Assign {
+                lhs: Box::new(lhs.to_full()?.map_opt(|e| e.to_full())?),
+                rhs: Box::new(rhs.to_full()?.map_opt(|e| e.to_full())?),
+            },
+            Expr::Call { name, args } => Expr::Call {
+                name,
+                args: args
+                    .into_iter()
+                    .map(|arg| arg.to_full()?.map_opt(|e| e.to_full()))
+                    .collect::<Option<_>>()?,
+            },
+            Expr::PrefixIncr(e) => Expr::PrefixIncr(Box::new(
+                e.to_full()?.map_opt(|e| e.to_full())?,
+            )),
+            Expr::PrefixDecr(e) => Expr::PrefixDecr(Box::new(
+                e.to_full()?.map_opt(|e| e.to_full())?,
+            )),
+            Expr::PostfixIncr(e) => Expr::PostfixIncr(Box::new(
+                e.to_full()?.map_opt(|e| e.to_full())?,
+            )),
+            Expr::PostfixDecr(e) => Expr::PostfixDecr(Box::new(
+                e.to_full()?.map_opt(|e| e.to_full())?,
+            )),
+            Expr::Addr(e) => {
+                Expr::Addr(Box::new(e.to_full()?.map_opt(|e| e.to_full())?))
+            }
+            Expr::Not(e) => {
+                Expr::Not(Box::new(e.to_full()?.map_opt(|e| e.to_full())?))
+            }
+            Expr::Neg(e) => {
+                Expr::Neg(Box::new(e.to_full()?.map_opt(|e| e.to_full())?))
+            }
+            Expr::Pos(e) => {
+                Expr::Pos(Box::new(e.to_full()?.map_opt(|e| e.to_full())?))
+            }
+            Expr::Op { op, lhs, rhs } => Expr::Op {
+                op,
+                lhs: Box::new(lhs.to_full()?.map_opt(|e| e.to_full())?),
+                rhs: Box::new(rhs.to_full()?.map_opt(|e| e.to_full())?),
+            },
+            Expr::SizeOf(ty) => Expr::SizeOf(ty.to_full()?),
+        })
     }
 }
 
 impl Instr<PartialTypeAnnotation> {
     fn to_full(self) -> Option<Instr<TypeAnnotation>> {
-        todo!()
+        Some(match self {
+            Instr::EmptyInstr => Instr::EmptyInstr,
+            Instr::ExprInstr(e) => {
+                Instr::ExprInstr(e.to_full()?.map_opt(|e| e.to_full())?)
+            }
+            Instr::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => Instr::If {
+                cond: cond.to_full()?.map_opt(|e| e.to_full())?,
+                then_branch: Box::new(
+                    then_branch.to_full()?.map_opt(|e| e.to_full())?,
+                ),
+                else_branch: Box::new(if let Some(branch) = *else_branch {
+                    Some(branch.to_full()?.map_opt(|e| e.to_full())?)
+                } else {
+                    None
+                }),
+            },
+            Instr::While { cond, body } => Instr::While {
+                cond: cond.to_full()?.map_opt(|e| e.to_full())?,
+                body: Box::new(body.to_full()?.map_opt(|e| e.to_full())?),
+            },
+            Instr::For {
+                loop_var,
+                cond,
+                incr,
+                body,
+            } => Instr::For {
+                loop_var: if let Some(var_decl) = loop_var {
+                    Some(var_decl.map_opt(|v| v.to_full())?)
+                } else {
+                    None
+                },
+                cond: if let Some(condition) = cond {
+                    Some(condition.to_full()?.map_opt(|e| e.to_full())?)
+                } else {
+                    None
+                },
+                incr: incr
+                    .into_iter()
+                    .map(|expr| expr.to_full()?.map_opt(|e| e.to_full()))
+                    .collect::<Option<_>>()?,
+                body: Box::new(body.to_full()?.map_opt(|e| e.to_full())?),
+            },
+            Instr::Block(b) => Instr::Block(
+                b.into_iter()
+                    .map(|decl_instr| decl_instr.to_full())
+                    .collect::<Option<_>>()?,
+            ),
+            Instr::Return(None) => Instr::Return(None),
+            Instr::Return(Some(value)) => {
+                Instr::Return(Some(value.to_full()?.map_opt(|e| e.to_full())?))
+            }
+            Instr::Break => Instr::Break,
+            Instr::Continue => Instr::Continue,
+        })
     }
 }
 
@@ -155,35 +308,20 @@ impl Annotation for TypeAnnotation {
 }
 
 impl<T> WithType<Option<T>, PartialType> {
-    fn to_full(
-        value: WithType<Option<T>, PartialType>,
-    ) -> Option<WithType<T, Type>> {
+    fn to_full(self) -> Option<WithType<T, Type>> {
         Some(WithType {
-            inner: value.inner?,
-            ty: value.ty.to_basic()?,
-            span: value.span,
-        })
-    }
-}
-
-impl<T> TypedInstr<T, PartialType> {
-    fn to_full(
-        value: TypedInstr<T, PartialType>,
-    ) -> Option<TypedInstr<T, Type>> {
-        Some(TypedInstr {
-            instr: value.instr,
-            span: value.span,
-            loop_level: value.loop_level,
-            expected_return_type: value.expected_return_type.to_basic()?,
+            inner: self.inner?,
+            ty: self.ty.to_basic()?,
+            span: self.span,
         })
     }
 }
 
 impl WithSpan<PartialType> {
-    fn to_full(value: WithSpan<PartialType>) -> Option<WithSpan<Type>> {
+    fn to_full(self) -> Option<WithSpan<Type>> {
         Some(WithSpan {
-            inner: value.inner.to_basic()?,
-            span: value.span,
+            inner: self.inner.to_basic()?,
+            span: self.span,
         })
     }
 }
@@ -199,12 +337,40 @@ impl PartialType {
     }
 }
 
+#[derive(Debug)]
 pub struct TypedInstr<U, T> {
     pub instr: U,
     pub span: Span,
     pub loop_level: usize,
     pub expected_return_type: T,
 }
+
+impl<T> TypedInstr<T, PartialType> {
+    fn to_full(self) -> Option<TypedInstr<T, Type>> {
+        Some(TypedInstr {
+            instr: self.instr,
+            span: self.span,
+            loop_level: self.loop_level,
+            expected_return_type: self.expected_return_type.to_basic()?,
+        })
+    }
+}
+
+impl<U, T> TypedInstr<U, T> {
+    fn map_opt<V>(
+        self,
+        f: impl FnOnce(U) -> Option<V>,
+    ) -> Option<TypedInstr<V, T>> {
+        Some(TypedInstr {
+            instr: f(self.instr)?,
+            span: self.span,
+            loop_level: self.loop_level,
+            expected_return_type: self.expected_return_type,
+        })
+    }
+}
+
+#[derive(Debug)]
 pub struct WithType<U, T> {
     pub inner: U,
     pub ty: T,
@@ -214,6 +380,17 @@ pub struct WithType<U, T> {
 impl<U, T> WithType<U, T> {
     pub fn new(inner: U, ty: T, span: Span) -> Self {
         Self { inner, ty, span }
+    }
+
+    fn map_opt<V>(
+        self,
+        f: impl FnOnce(U) -> Option<V>,
+    ) -> Option<WithType<V, T>> {
+        Some(WithType {
+            inner: f(self.inner)?,
+            ty: self.ty,
+            span: self.span,
+        })
     }
 }
 
@@ -295,15 +472,15 @@ fn type_expr(
         Expr::SizeOf(ty) => {
             let value = if !ty.inner.is_eq(&Type::VOID) {
                 Some(Expr::SizeOf(WithSpan {
-		    inner: ty.inner.from_basic(),
-		    span: ty.span.clone(),
+                    inner: ty.inner.from_basic(),
+                    span: ty.span.clone(),
                 }))
-	    } else {
+            } else {
                 report_error(Error::new(ErrorKind::SizeofVoid {
-		    span: e.span,
+                    span: e.span,
                 }));
                 None
-	    };
+            };
             WithType::new(value, PartialType::INT, ty.span)
         }
         Expr::Addr(inner_e) => {
@@ -363,11 +540,7 @@ fn type_expr(
                     found_type: ty2,
                 }));
             }
-            let found_type = if ty1 == PartialType::ERROR {
-                ty2
-            } else {
-                ty1
-            };
+            let found_type = if ty1 == PartialType::ERROR { ty2 } else { ty1 };
             WithType::new(
                 Some(Expr::Assign {
                     lhs: Box::new(lhs),
@@ -583,7 +756,7 @@ fn type_expr(
                     Error::new(ErrorKind::BuiltinBinopTypeMismatch {
                         left_type: ty1,
                         right_type: ty2,
-                        span: e.span,
+                        span: e.span.clone(),
                         op: "+",
                     })
                     .reason(String::from("pointers cannot be added."))
@@ -662,15 +835,17 @@ fn type_expr(
                             Error::new(ErrorKind::BuiltinBinopTypeMismatch {
                                 left_type: ty1,
                                 right_type: ty2,
-                                span: e.span,
+                                span: e.span.clone(),
                                 op: "-",
                             })
                             .reason(String::from(
                                 "heterogeneous pointers cannot be subtracted",
                             )),
-                        )
+                        );
+                        PartialType::ERROR
+                    } else {
+                        PartialType::INT
                     }
-                    PartialType::ERROR
                 } else if !ty2.is_eq(&PartialType::INT) {
                     report_error(Error::new(
                         ErrorKind::BuiltinBinopTypeMismatch {
@@ -703,6 +878,7 @@ fn type_expr(
             } else {
                 PartialType::INT
             };
+            println!("{} - {} : {}", ty1, ty2, ret_type);
             WithType::new(Some(new_e), ret_type, e.span)
         }
         Expr::Call { name, args } => {
@@ -892,15 +1068,13 @@ fn typecheck_instr(
                 name_of,
             ));
 
-            cond.as_ref().map(|cond| {
+            if let Some(ref cond) = cond {
                 if cond.ty.is_void() {
-                    Err(Error::new(ErrorKind::VoidExpression {
+                    report_error(Error::new(ErrorKind::VoidExpression {
                         span: cond.span.clone(),
                     }))
-                } else {
-                    Ok(())
                 }
-            });
+            }
 
             if body.expected_return_type != expected_return_type {
                 report_error(
@@ -1089,7 +1263,7 @@ fn typecheck_block(
                         name: name_of[var_decl.inner.name.inner].clone(),
                     }));
                 }
-                assert_var_is_not_reused(
+                if let Err(error) = assert_var_is_not_reused(
                     var_decl
                         .inner
                         .name
@@ -1097,7 +1271,9 @@ fn typecheck_block(
                         .with_span(var_decl.span.clone()),
                     &new_bindings,
                     name_of,
-                );
+                ) {
+                    report_error(error)
+                };
                 new_bindings.push((
                     var_decl
                         .inner
@@ -1314,9 +1490,7 @@ pub fn typecheck(
 
     let errors = get_errors();
     if errors.is_empty() {
-        Ok(File::<PartialTypeAnnotation> { fun_decls }
-            .to_full()
-            .unwrap())
+        Ok(File { fun_decls }.to_full().unwrap())
     } else {
         Err(errors)
     }

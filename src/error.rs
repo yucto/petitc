@@ -488,7 +488,7 @@ impl From<BeansError> for ErrorKind {
     }
 }
 
-mod display {
+pub(crate) mod display {
     use super::*;
 
     pub fn span(span: &Span, f: &mut fmt::Formatter) -> fmt::Result {
