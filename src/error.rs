@@ -1,4 +1,4 @@
-use crate::{ast::Type, cwrite, cwriteln};
+use crate::{typechecker::PartialType, cwrite, cwriteln, typing::Type};
 use beans::{error::Error as BeansError, span::Span};
 use std::fmt;
 use thiserror::Error;
@@ -414,8 +414,8 @@ pub enum ErrorKind {
     },
     NoMainFunction,
     IncorrectMainFunctionType {
-        ty: crate::ast::Type,
-        params: Vec<crate::ast::Type>,
+        ty: Type,
+        params: Vec<PartialType>,
         span: Span,
     },
     BreakContinueOutsideLoop {
@@ -455,8 +455,8 @@ pub enum ErrorKind {
     VariableTypeMismatch {
         span: Span,
         definition_span: Span,
-        expected_type: Type,
-        found_type: Type,
+        expected_type: PartialType,
+        found_type: PartialType,
         variable_name: String,
     },
     SizeofVoid {
@@ -467,16 +467,16 @@ pub enum ErrorKind {
     },
     TypeMismatch {
         span: Span,
-        expected_type: Type,
-        found_type: Type,
+        expected_type: PartialType,
+        found_type: PartialType,
     },
     IncrOrDecrRvalue {
         span: Span,
         expression_span: Span,
     },
     BuiltinBinopTypeMismatch {
-        left_type: Type,
-        right_type: Type,
+        left_type: PartialType,
+        right_type: PartialType,
         span: Span,
         op: &'static str,
     },
