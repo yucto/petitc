@@ -2,6 +2,7 @@ ignore SPACE ::= \s+
 ignore NEWLINE ::= \n
 ignore COMMENT ::= //[^\n]*\n
 ignore MULTICOMMENT ::= /\*([^*]|\*[^/])*\*/
+(unfinished comment) ECOMMENT ::= /\*([^*]|\*[^/])*
 INCLUDE ::= #include\s*<[^>]*>\s*
 
 LT ::= <
@@ -11,7 +12,7 @@ RPAR ::= \)
 LBRACE ::= {
 RBRACE ::= }
 LBRACKET ::= \[
-RBRACKET ::= ]
+RBRACKET ::= \]
 
 keyword BOOL ::= bool
 keyword BREAK ::= break
