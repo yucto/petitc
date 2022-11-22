@@ -1,4 +1,4 @@
-use crate::{typechecker::PartialType, cwrite, cwriteln, typing::Type};
+use crate::{cwrite, cwriteln, typechecker::PartialType, typing::Type};
 use beans::{error::Error as BeansError, span::Span};
 use std::fmt;
 use thiserror::Error;
@@ -93,8 +93,20 @@ impl fmt::Display for Error {
                     f,
                 )?;
             }
-            ErrorKind::Beans(BeansError::LexingError { message, location }) => {
+            ErrorKind::Beans(BeansError::LexingError { location }) => {
                 let span = location.get();
+                display::span(span, f)?;
+                error!(f, "this file cannot be lexed")?;
+                display::pretty_span(
+                    span,
+                    "^",
+                    "unable to recognize a token here",
+                    "-->",
+                    f,
+                )?;
+            }
+            ErrorKind::Beans(BeansError::UnwantedToken { span, message }) => {
+                let span = span.get();
                 display::span(span, f)?;
                 error!(f, "{}", message)?;
                 display::pretty_span(span, "^", "", "-->", f)?;
