@@ -431,6 +431,7 @@ dependencies = [
  "color-print",
  "colored",
  "thiserror",
+ "write_x86_64",
 ]
 
 [[package]]
@@ -769,6 +770,12 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "write_x86_64"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc65495387389ea8a47dc0d6e3fc19aa94818e54d69733ca5f60ef89059b5d6f"
 
 [[package]]
 name = "yaml-rust"

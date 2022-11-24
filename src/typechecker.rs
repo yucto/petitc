@@ -3,11 +3,9 @@ use colored::Colorize;
 
 use std::collections::HashMap;
 
-use crate::error::ErrorKind;
-
 use super::{
     ast::*,
-    error::{Error, Result},
+    error::{Error, ErrorKind, Result},
     parsing::{SpanAnnotation, WithSpan},
 };
 
@@ -128,17 +126,17 @@ fn type_expr(
                 let mut ty = inner_e.ty;
                 if ty.is_ptr() {
                     ty.indirection_count -= 1;
-		    if ty.is_eq(&Type::VOID) {
-			Err(Error::new(ErrorKind::DerefVoidPointer {
-			    span: inner_e.span,
-			}))
-		    } else {
-			Ok(WithType::new(
+                    if ty.is_eq(&Type::VOID) {
+                        Err(Error::new(ErrorKind::DerefVoidPointer {
+                            span: inner_e.span,
+                        }))
+                    } else {
+                        Ok(WithType::new(
                             Expr::Deref(Box::new(inner_e)),
                             ty,
                             e.span,
-			))
-		    }
+                        ))
+                    }
                 } else {
                     Err(Error::new(ErrorKind::DerefNonPointer {
                         ty,
@@ -259,10 +257,10 @@ fn type_expr(
             let rhs = type_expr(*rhs, env, name_of)?;
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
-	    if ty1.is_eq(&Type::VOID) {
-		Err(Error::new(ErrorKind::VoidExpression { span: lhs.span, }))
-	    } else if ty2.is_eq(&Type::VOID) {
-		Err(Error::new(ErrorKind::VoidExpression { span: rhs.span, }))
+            if ty1.is_eq(&Type::VOID) {
+                Err(Error::new(ErrorKind::VoidExpression { span: lhs.span }))
+            } else if ty2.is_eq(&Type::VOID) {
+                Err(Error::new(ErrorKind::VoidExpression { span: rhs.span }))
             } else if !ty1.is_eq(&ty2) {
                 Err(Error::new(ErrorKind::TypeMismatch {
                     span: rhs.span,
@@ -344,10 +342,10 @@ fn type_expr(
                     span: e.span,
                     op: "+",
                 })
-			   .reason(String::from("pointers cannot be added."))
-			   .add_help(String::from(
-			       "maybe you meant to subtract the pointers?",
-			   )));
+                .reason(String::from("pointers cannot be added."))
+                .add_help(String::from(
+                    "maybe you meant to subtract the pointers?",
+                )));
             }
 
             if ty2.is_ptr() {
@@ -374,9 +372,9 @@ fn type_expr(
                     span: e.span,
                     op: "+",
                 })
-                    .reason(format!(
-                        "casting between {ty1} and {ty2} is undefined"
-                    )))
+                .reason(format!(
+                    "casting between {ty1} and {ty2} is undefined"
+                )))
             } else if !ty1.is_eq(&Type::INT) {
                 Err(Error::new(ErrorKind::BuiltinBinopTypeMismatch {
                     left_type: ty1,
@@ -384,11 +382,10 @@ fn type_expr(
                     span: e.span,
                     op: "+",
                 })
-                    .reason(format!("addition over `{ty1}` is undefined")))
+                .reason(format!("addition over `{ty1}` is undefined")))
             } else {
                 Ok(WithType::new(new_e, Type::INT, e.span))
             }
-            
         }
         Expr::Op {
             op: BinOp::Sub,
