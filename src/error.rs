@@ -68,11 +68,11 @@ impl fmt::Display for Error {
                         "no token would make sense here, what have you done?",
                     ),
                     [alternative] => {
-                        format!("you should use {alternative} instead")
+                        format!("try inserting {alternative} right before")
                     }
                     [starts @ .., last] => {
                         format!(
-                            "the tokens {} or {last} would make sense here",
+                            "{} or {last} were expected here",
                             starts.join(", ")
                         )
                     }
