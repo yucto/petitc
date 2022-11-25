@@ -62,7 +62,7 @@ impl fmt::Display for Error {
                 let span = location.get();
                 display::span(span, f)?;
                 error!(f, "the token {} cannot be recognized here", name)?;
-                display::pretty_span(span, "^", "", "-->", f)?;
+                display::pretty_span(span, "^", "", "-->", true, f)?;
                 let alternative_message = match &alternatives[..] {
                     [] => String::from(
                         "no token would make sense here, what have you done?",
@@ -90,6 +90,7 @@ impl fmt::Display for Error {
                     "^",
                     "the rest of the program is missing",
                     "-->",
+                    true,
                     f,
                 )?;
             }
@@ -102,6 +103,7 @@ impl fmt::Display for Error {
                     "^",
                     "unable to recognize a token here",
                     "-->",
+                    true,
                     f,
                 )?;
             }
@@ -109,7 +111,7 @@ impl fmt::Display for Error {
                 let span = span.get();
                 display::span(span, f)?;
                 error!(f, "{}", message)?;
-                display::pretty_span(span, "^", "", "-->", f)?;
+                display::pretty_span(span, "^", "", "-->", true, f)?;
             }
             ErrorKind::Beans(other) => {
                 writeln!(
@@ -129,7 +131,7 @@ impl fmt::Display for Error {
 		    ty,
 		    params.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "),
 		)?;
-                display::pretty_span(span, "^", "", "-->", f)?;
+                display::pretty_span(span, "^", "", "-->", true, f)?;
             }
             ErrorKind::BreakContinueOutsideLoop { span } => {
                 display::span(span, f)?;
@@ -139,6 +141,7 @@ impl fmt::Display for Error {
                     "^",
                     "`break` and `continue` must be within loops",
                     "-->",
+                    true,
                     f,
                 )?;
             }
@@ -150,6 +153,7 @@ impl fmt::Display for Error {
                     "^",
                     "not found in this scope",
                     "-->",
+                    true,
                     f,
                 )?;
             }
@@ -164,6 +168,7 @@ impl fmt::Display for Error {
                     "^",
                     "this expression has no address in memory",
                     "-->",
+                    true,
                     f,
                 )?;
             }
@@ -175,6 +180,7 @@ impl fmt::Display for Error {
                     "^",
                     "this is not a pointer, it cannot be dereferenced",
                     "-->",
+                    true,
                     f,
                 )?;
             }
@@ -192,7 +198,7 @@ impl fmt::Display for Error {
                     second_definition,
                     "second definition found here",
                     first_definition,
-                    "first_definition_found_here",
+                    "first definition found here",
                     f,
                 )?;
             }
@@ -223,6 +229,7 @@ impl fmt::Display for Error {
                         "^",
                         format!("found {} arguments", found_arity),
                         "-->",
+                        true,
                         f,
                     )?;
                     let nb_line_length =
@@ -260,6 +267,7 @@ impl fmt::Display for Error {
                         "^",
                         "definition found here",
                         "-->",
+                        true,
                         f,
                     )?;
                     let nb_line_length = (second_definition.end().0 + 1)
@@ -285,6 +293,7 @@ impl fmt::Display for Error {
                     "^",
                     "`void` is not a valid type for a variable",
                     "-->",
+                    true,
                     f,
                 )?;
             }
@@ -314,7 +323,7 @@ impl fmt::Display for Error {
             ErrorKind::DerefVoidPointer { span } => {
                 display::span(span, f)?;
                 error!(f, "`void*` cannot be dereferenced",)?;
-                display::pretty_span(span, "^", "", "-->", f)?;
+                display::pretty_span(span, "^", "", "-->", true, f)?;
                 cwriteln!(
 		    f,
 		    "  <s,b!>=</> <s,w!>help:</> try casting this value to an other pointer type before dereferencing it",
@@ -326,7 +335,7 @@ impl fmt::Display for Error {
                     f,
                     "this expression has type `void`, which is forbidden",
                 )?;
-                display::pretty_span(span, "^", "", "-->", f)?;
+                display::pretty_span(span, "^", "", "-->", true, f)?;
                 cwriteln!(
 		    f,
 		    "  <s,b!>=</> <s,w!>note:</> expressions with type `void` can only be discarded"
@@ -335,7 +344,7 @@ impl fmt::Display for Error {
             ErrorKind::SizeofVoid { span } => {
                 display::span(span, f)?;
                 error!(f, "`void` does not have a size",)?;
-                display::pretty_span(span, "^", "", "-->", f)?;
+                display::pretty_span(span, "^", "", "-->", true, f)?;
                 cwriteln!(f, "  <s,b!>=</> <s,w!>hint: <i>use gcc!</></>")?;
             }
             ErrorKind::RvalueAssignment { span } => {
@@ -349,6 +358,7 @@ impl fmt::Display for Error {
                     "^",
                     "cannot assign to this expression",
                     "-->",
+                    true,
                     f,
                 )?;
             }
@@ -364,7 +374,7 @@ impl fmt::Display for Error {
                     expected_type,
                     found_type,
                 )?;
-                display::pretty_span(span, "^", "wrong type", "-->", f)?;
+                display::pretty_span(span, "^", "wrong type", "-->", true, f)?;
             }
             ErrorKind::IncrOrDecrRvalue {
                 span,
@@ -377,6 +387,7 @@ impl fmt::Display for Error {
                     "^",
                     "cannot mutate this expression",
                     "-->",
+                    true,
                     f,
                 )?;
             }
@@ -399,6 +410,7 @@ impl fmt::Display for Error {
                     "^",
                     "invalid arithmetic operation",
                     "-->",
+                    true,
                     f,
                 )?;
             }
@@ -612,7 +624,7 @@ pub(crate) mod display {
         left_column(left_column_size, f)?;
         cwriteln!(
             f,
-            "<s,r!>{}{}</><s,r!><s,r!>{}</> {}</>",
+            "<s,r!>{}{}</><s,r!>{} {}</>",
             padding,
             offset_char.repeat(offset),
             underline_filler.repeat(length),
@@ -627,12 +639,80 @@ pub(crate) mod display {
         hint_message: impl fmt::Display,
         f: &mut fmt::Formatter,
     ) -> fmt::Result {
-        if hint_span.end() <= span.start() {
-            pretty_span(hint_span, "~", hint_message, "-->", f)?;
-            pretty_span(span, "^", message, ":::", f)?;
+        if hint_span.start().0 == hint_span.end().0
+            && span.start().0 == span.end().0
+            && span.start().0 == hint_span.end().0
+        {
+            let left_column_size =
+                (span.start().0 + 1).to_string().len().max(3);
+	    error_report(span, left_column_size, "-->", f)?;
+	    left_column_newline(left_column_size, f)?;
+	    single_line(span, left_column_size, "", span.start().0, f)?;
+	    let is_span_first = hint_span.start().1 > span.end().1;
+	    left_column(left_column_size, f)?;
+	    if is_span_first {
+		let offset1 = span.start().1;
+		let length1 = span.end().1 - span.start().1 + 1;
+		let offset2 = hint_span.start().1 - (offset1+length1);
+		let length2 = hint_span.end().1 - hint_span.start().1 + 1;
+		cwriteln!(
+		    f,
+		    "{}<s,r!>{}</>{}<s,r!>{} {}</>",
+		    " ".repeat(offset1),
+		    "^".repeat(length1),
+		    " ".repeat(offset2),
+		    "~".repeat(length2),
+		    hint_message,
+		)?;
+		left_column(left_column_size, f)?;
+		cwriteln!(
+		    f,
+		    "{}<s,r!>{}</>",
+		    " ".repeat(offset1+length1-1),
+		    message,
+		)?;
+	    } else {
+		let offset1 = hint_span.start().1;
+		let length1 = hint_span.end().1 - hint_span.start().1 + 1;
+		let offset2 = span.start().1 - (offset1+length1);
+		let length2 = span.end().1 - span.start().1 + 1;
+		cwriteln!(
+		    f,
+		    "{}<s,r!>{}</>{}<s,r!>{} {}</>",
+		    " ".repeat(offset1),
+		    "~".repeat(length1),
+		    " ".repeat(offset2),
+		    "^".repeat(length2),
+		    message,
+		)?;
+		left_column(left_column_size, f)?;
+		cwriteln!(
+		    f,
+		    "{}<s,r!>{}</>",
+		    " ".repeat(offset1+length1-1),
+		    hint_message,
+		)?;
+	    }
+        } else if hint_span.end() <= span.start() {
+            pretty_span(hint_span, "~", hint_message, "-->", true, f)?;
+            pretty_span(
+                span,
+                "^",
+                message,
+                ":::",
+                span.file() != hint_span.file(),
+                f,
+            )?;
         } else {
-            pretty_span(span, "^", message, "-->", f)?;
-            pretty_span(hint_span, "~", hint_message, ":::", f)?;
+            pretty_span(span, "^", message, "-->", true, f)?;
+            pretty_span(
+                hint_span,
+                "~",
+                hint_message,
+                ":::",
+                span.file() != hint_span.file(),
+                f,
+            )?;
         }
         Ok(())
     }
@@ -642,11 +722,14 @@ pub(crate) mod display {
         underline: &'static str,
         message: impl fmt::Display,
         arrow: impl fmt::Display,
+        show_line: bool,
         f: &mut fmt::Formatter,
     ) -> fmt::Result {
         let left_column_size = (span.start().0 + 1).to_string().len().max(3);
-        error_report(span, left_column_size, arrow, f)?;
-        left_column_newline(left_column_size, f)?;
+        if show_line {
+            error_report(span, left_column_size, arrow, f)?;
+            left_column_newline(left_column_size, f)?;
+        };
         if span.start().0 != span.end().0 {
             single_line(span, left_column_size, "  ", span.start().0, f)?;
             comment(
