@@ -2,10 +2,12 @@ use std::rc::Rc;
 use std::{collections::HashMap, path::Path};
 
 use crate::ast::{
-    Annotation, BinOp, DeclOrInstr, Expr, File, FunDecl, Ident, Instr, Type,
+    Annotation, BinOp, DeclOrInstr, Expr, File, FunDecl, Ident, Instr,
     VarDecl,
 };
+use crate::typing::Type;
 use crate::error::Result;
+use crate::typechecker::PartialType;
 
 use beans::error::WarningSet;
 use beans::include_parser;
@@ -109,10 +111,19 @@ impl Annotation for SpanAnnotation {
     type WrapElseBranch<T> = Option<WithSpan<T>>;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct WithSpan<T> {
     pub inner: T,
     pub span: Span,
+}
+
+impl From<WithSpan<Type>> for WithSpan<PartialType> {
+    fn from(WithSpan { inner, span }: WithSpan<Type>) -> Self {
+	WithSpan {
+	    inner: inner.from_basic(),
+	    span,
+	}
+    }
 }
 
 impl<T> WithSpan<T> {
@@ -120,11 +131,18 @@ impl<T> WithSpan<T> {
         Self { inner, span }
     }
 
-    pub fn map<U>(self, f: impl Fn(T) -> U) -> WithSpan<U> {
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> WithSpan<U> {
         WithSpan {
             inner: f(self.inner),
             span: self.span,
         }
+    }
+
+    pub fn map_opt<U>(self, f: impl FnOnce(T) -> Option<U>) -> Option<WithSpan<U>> {
+	Some(WithSpan {
+	    inner: f(self.inner)?,
+	    span: self.span,
+	})
     }
 
     pub fn with_span(self, span: Span) -> Self {
