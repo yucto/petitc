@@ -31,6 +31,9 @@ keyword WHILE ::= while
 
 INT ::= (0|[1-9][0-9]*)
 CHAR ::= '([ -&(-[\]-~]|\\\\|\\'|\\n|\\t)'
+(`'` has to be escaped in a literal `char`) UEACHAR ::= '''
+(`\\` has to be escaped in a literal `char`) UEBCHAR ::= '\\'
+DOT ::= \.
 IDENT ::= ([a-zA-Z_][a-zA-Z_0-9]*)
 COMMA ::= ,
 SEMICOLON ::= ;
