@@ -1,5 +1,3 @@
-use core::fmt;
-
 use crate::typing::Type;
 
 /// All strings are represented by an index in a Vec<String>
