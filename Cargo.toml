@@ -7,8 +7,8 @@ authors = [ "Adrien Mathieu <adrien.lc.mathieu@gmail.com>",
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-clap = { version = "4.0.18", features = ["derive"] }
-beans = "6.3"
-thiserror = "1.0.37"
-colored = "2.0.0"
-color-print = "0.3.4"
+clap = { version = "4", features = ["derive"] }
+beans = "6.5"
+thiserror = "1"
+colored = "2"
+color-print = "0.3"
