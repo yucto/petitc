@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use error::Result;
+use error::{Error, Result};
 use parsing::parse_to_ast;
 
 pub mod ast;
@@ -9,6 +9,7 @@ mod compile;
 pub mod error;
 mod parsing;
 mod typechecker;
+mod typing;
 
 pub fn parse(
     p: impl AsRef<Path>,
@@ -26,13 +27,13 @@ pub fn typecheck(
     _p: impl AsRef<Path>,
     file: ast::File<parsing::SpanAnnotation>,
     string_store: &[String],
-) -> Result<ast::File<typechecker::TypeAnnotation>> {
+) -> std::result::Result<ast::File<typechecker::TypeAnnotation>, Vec<Error>> {
     typechecker::typecheck(file, string_store)
 }
 
 pub fn compile(
     _p: impl AsRef<Path>,
     _: ast::File<typechecker::TypeAnnotation>,
-) -> Result<()> {
+) -> () {
     unimplemented!()
 }

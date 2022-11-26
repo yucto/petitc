@@ -252,7 +252,7 @@ fn compile_block(
             // TODO: Fun in block
             DeclOrInstr::Fun(_) => (),
             DeclOrInstr::Var(var) => {
-                let var_decl = var.inner;
+                let var_decl = &var.inner;
                 if let Some(var) = variables.remove(&var_decl.name.inner) {
                     old_variables.insert(var_decl.name.inner, var);
                 }
