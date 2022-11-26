@@ -9,6 +9,7 @@ use super::{
     parsing::{SpanAnnotation, WithSpan},
 };
 
+#[derive(Clone)]
 pub struct TypeAnnotation;
 pub struct TypedInstr<T> {
     pub instr: T,
@@ -16,6 +17,7 @@ pub struct TypedInstr<T> {
     pub loop_level: usize,
     pub expected_return_type: Type,
 }
+#[derive(Clone)]
 pub struct WithType<T> {
     pub inner: T,
     pub ty: Type,

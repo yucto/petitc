@@ -158,7 +158,7 @@ pub struct VarDecl<A: Annotation> {
 }
 
 #[rustfmt::skip]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum BinOp {
     Eq, NEq,
     Lt, Le, Gt, Ge,
@@ -167,6 +167,7 @@ pub enum BinOp {
 }
 
 #[rustfmt::skip]
+#[derive(Clone, Debug)]
 pub enum Expr<A: Annotation> {
     Int(i64), True, False, Null,
     Ident(Ident),
@@ -185,7 +186,7 @@ pub enum Expr<A: Annotation> {
 
 impl<A: Annotation> Expr<A> {
     pub const fn is_lvalue(&self) -> bool {
-	matches!(self, Expr::Ident(_) | Expr::Deref(_))
+        matches!(self, Expr::Ident(_) | Expr::Deref(_))
     }
 }
 

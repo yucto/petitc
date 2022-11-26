@@ -4,10 +4,11 @@ use error::Result;
 use parsing::parse_to_ast;
 
 pub mod ast;
+mod color;
+mod compile;
 pub mod error;
 mod parsing;
 mod typechecker;
-mod color;
 
 pub fn parse(
     p: impl AsRef<Path>,
