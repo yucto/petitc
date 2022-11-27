@@ -2,6 +2,8 @@ use write_x86_64::*;
 
 use std::collections::HashMap;
 
+use crate::parsing::WithSpan;
+
 use super::{ast::*, typechecker::*};
 
 /// Push the addr of the given lvalue in %rax
@@ -217,25 +219,8 @@ fn compile_instr(
             *asm += Text::label(loop_exit);
         }
         Instr::For {
-            loop_var: Some(var_decl),
-            cond,
-            incr,
-            body,
-        } => {
-            let block = vec![
-                DeclOrInstr::Var(var_decl),
-                DeclOrInstr::Instr(TypedInstr {
-                    instr: Instr::For {
-                        loop_var: None,
-                        cond,
-                        incr,
-                        body,
-                    },
-                    ..instr
-                }),
-            ];
-            compile_block(block, asm, variables, current_loop, name_of);
-        }
+            loop_var: Some(_), ..
+        } => unreachable!(),
         Instr::For {
             loop_var: None,
             cond,
@@ -280,7 +265,7 @@ fn compile_instr(
 }
 
 fn compile_block(
-    block: Vec<DeclOrInstr<TypeAnnotation>>,
+    block: WithSpan<Vec<DeclOrInstr<TypeAnnotation>>>,
     asm: &mut Text,
     variables: &mut HashMap<usize, i64>,
     current_loop: Option<(&reg::Label, &reg::Label)>,
@@ -289,8 +274,8 @@ fn compile_block(
     let mut variable_names = Vec::new();
     let mut old_variables = HashMap::new();
 
-    for instr_or_decl in &block {
-        match instr_or_decl {
+    for decl_or_instr in &block.inner {
+        match decl_or_instr {
             // TODO: Fun in block
             DeclOrInstr::Fun(_) => (),
             DeclOrInstr::Var(var) => {
@@ -309,8 +294,8 @@ fn compile_block(
         }
     }
 
-    for instr_or_decl in block {
-        if let DeclOrInstr::Instr(instr) = instr_or_decl {
+    for decl_or_instr in block.inner {
+        if let DeclOrInstr::Instr(instr) = decl_or_instr {
             compile_instr(instr, asm, current_loop, variables, name_of);
         }
     }

@@ -2,17 +2,16 @@ use std::rc::Rc;
 use std::{collections::HashMap, path::Path};
 
 use crate::ast::{
-    Annotation, BinOp, DeclOrInstr, Expr, File, FunDecl, Ident, Instr,
-    VarDecl,
+    Annotation, BinOp, DeclOrInstr, Expr, File, FunDecl, Ident, Instr, VarDecl,
 };
-use crate::typing::Type;
 use crate::error::Result;
 use crate::typechecker::PartialType;
+use crate::typing::Type;
 
 use beans::error::WarningSet;
 use beans::include_parser;
-use beans::span::Span;
 use beans::parser::{Parser, Value, AST};
+use beans::span::Span;
 use beans::stream::StringStream;
 
 macro_rules! error {
@@ -106,6 +105,7 @@ impl Annotation for SpanAnnotation {
     type Type = WithSpan<Type>;
     type WrapExpr<T> = WithSpan<T>;
     type WrapInstr<T> = WithSpan<T>;
+    type WrapBlock<T> = WithSpan<T>;
     type WrapFunDecl<T> = WithSpan<T>;
     type WrapVarDecl<T> = WithSpan<T>;
     type WrapElseBranch<T> = Option<WithSpan<T>>;
@@ -119,10 +119,10 @@ pub struct WithSpan<T> {
 
 impl From<WithSpan<Type>> for WithSpan<PartialType> {
     fn from(WithSpan { inner, span }: WithSpan<Type>) -> Self {
-	WithSpan {
-	    inner: inner.from_basic(),
-	    span,
-	}
+        WithSpan {
+            inner: inner.from_basic(),
+            span,
+        }
     }
 }
 
@@ -138,11 +138,14 @@ impl<T> WithSpan<T> {
         }
     }
 
-    pub fn map_opt<U>(self, f: impl FnOnce(T) -> Option<U>) -> Option<WithSpan<U>> {
-	Some(WithSpan {
-	    inner: f(self.inner)?,
-	    span: self.span,
-	})
+    pub fn map_opt<U>(
+        self,
+        f: impl FnOnce(T) -> Option<U>,
+    ) -> Option<WithSpan<U>> {
+        Some(WithSpan {
+            inner: f(self.inner)?,
+            span: self.span,
+        })
     }
 
     pub fn with_span(self, span: Span) -> Self {
@@ -510,15 +513,6 @@ fn read_block(
     ast: AST,
     toplevel: bool,
     string_store: &mut Vec<String>,
-    string_assoc: &mut HashMap<String, Ident>,
-) -> Vec<DeclOrInstr<SpanAnnotation>> {
-    read_annotated_block(ast, toplevel, string_store, string_assoc).inner
-}
-
-fn read_annotated_block(
-    ast: AST,
-    toplevel: bool,
-    string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
 ) -> WithSpan<Vec<DeclOrInstr<SpanAnnotation>>> {
     let mut node = node!(ast);
@@ -579,7 +573,7 @@ fn read_fun_decl(
             string_store,
             string_assoc,
         ),
-        code: read_annotated_block(
+        code: read_block(
             get!(node, "block"),
             toplevel,
             string_store,

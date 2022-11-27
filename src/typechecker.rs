@@ -91,6 +91,7 @@ impl Annotation for PartialTypeAnnotation {
     type Type = WithSpan<PartialType>;
     type WrapExpr<T> = WithType<Option<T>, PartialType>;
     type WrapInstr<T> = TypedInstr<T, PartialType>;
+    type WrapBlock<T> = WithSpan<T>;
     type WrapFunDecl<T> = WithSpan<T>;
     type WrapVarDecl<T> = WithSpan<T>;
     type WrapElseBranch<T> = Option<TypedInstr<T, PartialType>>;
@@ -110,12 +111,6 @@ impl File<PartialTypeAnnotation> {
 
 impl FunDecl<PartialTypeAnnotation> {
     fn to_full(self) -> Option<FunDecl<TypeAnnotation>> {
-        let TypedInstr {
-            instr,
-            span,
-            loop_level,
-            expected_return_type,
-        } = self.code;
         Some(FunDecl {
             ty: self.ty.to_full()?,
             name: self.name,
@@ -124,15 +119,14 @@ impl FunDecl<PartialTypeAnnotation> {
                 .into_iter()
                 .map(|(arg_ty, arg)| Some((arg_ty.to_full()?, arg)))
                 .collect::<Option<_>>()?,
-            code: TypedInstr {
-                instr: instr
+            code: WithSpan::new(
+                self.code
+                    .inner
                     .into_iter()
-                    .map(|decl_instr| decl_instr.to_full())
+                    .map(|decl_or_instr| Some(decl_or_instr.to_full()?))
                     .collect::<Option<_>>()?,
-                span,
-                loop_level,
-                expected_return_type: expected_return_type.to_basic()?,
-            },
+                self.code.span,
+            ),
             toplevel: self.toplevel,
         })
     }
@@ -276,11 +270,12 @@ impl Instr<PartialTypeAnnotation> {
                     .collect::<Option<_>>()?,
                 body: Box::new(body.to_full()?.map_opt(|e| e.to_full())?),
             },
-            Instr::Block(b) => Instr::Block(
-                b.into_iter()
-                    .map(|decl_instr| decl_instr.to_full())
-                    .collect::<Option<_>>()?,
-            ),
+            Instr::Block(block) => Instr::Block(block.map_opt(|block| {
+                block
+                    .into_iter()
+                    .map(|decl_or_instr| Some(decl_or_instr.to_full()?))
+                    .collect::<Option<_>>()
+            })?),
             Instr::Return(None) => Instr::Return(None),
             Instr::Return(Some(value)) => {
                 Instr::Return(Some(value.to_full()?.map_opt(|e| e.to_full())?))
@@ -298,6 +293,7 @@ impl Annotation for TypeAnnotation {
     type Type = WithSpan<Type>;
     type WrapExpr<T> = WithType<T, Type>;
     type WrapInstr<T> = TypedInstr<T, Type>;
+    type WrapBlock<T> = WithSpan<T>;
     type WrapFunDecl<T> = WithSpan<T>;
     type WrapVarDecl<T> = WithSpan<T>;
     type WrapElseBranch<T> = Option<TypedInstr<T, Type>>;
@@ -928,6 +924,7 @@ fn type_expr(
     }
 }
 
+/// The returned instruction can't be a for variant with a variable declaration
 fn typecheck_instr(
     instr: WithSpan<Instr<SpanAnnotation>>,
     loop_level: usize,
@@ -1123,7 +1120,7 @@ fn typecheck_instr(
             name_of,
         ),
         Instr::Block(block) => typecheck_block(
-            WithSpan::new(block, instr.span),
+            block,
             loop_level,
             expected_return_type,
             env,
@@ -1183,7 +1180,7 @@ fn typecheck_instr(
     }
 }
 
-/// On returning an instr, always returns a block
+/// Always returns a block
 fn typecheck_block(
     block: WithSpan<Vec<DeclOrInstr<SpanAnnotation>>>,
     loop_level: usize,
@@ -1342,7 +1339,7 @@ fn typecheck_block(
     }
 
     TypedInstr {
-        instr: Instr::Block(ret),
+        instr: Instr::Block(WithSpan::new(ret, block.span.clone())),
         span: block.span,
         loop_level,
         expected_return_type,
@@ -1357,7 +1354,6 @@ fn typecheck_fun(
     env: &mut Environment,
     name_of: &[String],
 ) -> WithSpan<FunDecl<PartialTypeAnnotation>> {
-    let code_span = decl.inner.code.span.clone();
     let code = decl
         .inner
         .params
@@ -1397,18 +1393,12 @@ fn typecheck_fun(
         name_of,
     );
 
-    let Instr::Block(mut code) =
+    let Instr::Block(code) =
         typed_instr.instr
     else { unreachable!("Internal error") };
 
-    code = code.into_iter().skip(decl.inner.params.len()).collect();
-
-    let typed_code = TypedInstr {
-        instr: code,
-        span: code_span,
-        loop_level: typed_instr.loop_level,
-        expected_return_type: typed_instr.expected_return_type,
-    };
+    let typed_code = code
+        .map(|code| code.into_iter().skip(decl.inner.params.len()).collect());
 
     WithSpan::new(
         FunDecl {
@@ -1420,6 +1410,7 @@ fn typecheck_fun(
                 .into_iter()
                 .map(|(left, right)| (left.into(), right))
                 .collect(),
+            // TODO: properly report error
             code: typed_code,
             toplevel: decl.inner.toplevel,
         },

@@ -10,6 +10,7 @@ pub trait Annotation {
     type Type;
     type WrapExpr<T>;
     type WrapInstr<T>;
+    type WrapBlock<T>;
     type WrapFunDecl<T>;
     type WrapVarDecl<T>;
     type WrapElseBranch<T>;
@@ -25,6 +26,7 @@ impl Annotation for DummyAnnotation {
     type Type = Type;
     type WrapExpr<T> = T;
     type WrapInstr<T> = T;
+    type WrapBlock<T> = T;
     type WrapFunDecl<T> = T;
     type WrapVarDecl<T> = T;
     type WrapElseBranch<T> = Option<T>;
@@ -39,7 +41,7 @@ pub struct FunDecl<A: Annotation> {
     pub name: A::Ident,
     pub params: Vec<(A::Type, A::Ident)>,
     /// Behave like an Instr::Block
-    pub code: A::WrapInstr<Vec<DeclOrInstr<A>>>,
+    pub code: A::WrapBlock<Vec<DeclOrInstr<A>>>,
     /// Store wether it is declared at the toplevel or not
     pub toplevel: bool,
 }
@@ -114,7 +116,7 @@ pub enum Instr<A: Annotation> {
         body: Box<A::WrapInstr<Instr<A>>>,
     },
     /// { body }
-    Block(Vec<DeclOrInstr<A>>),
+    Block(A::WrapBlock<Vec<DeclOrInstr<A>>>),
     /// return (expr)?;
     Return(Option<A::WrapExpr<Expr<A>>>),
     /// break;
