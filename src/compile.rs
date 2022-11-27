@@ -196,7 +196,7 @@ fn compile_instr(
                     name_of,
                 );
             }
-            *asm += Text::label(endif_label)
+            *asm += Text::label(endif_label);
         }
         Instr::While { cond, body } => {
             let loop_start =
@@ -214,14 +214,56 @@ fn compile_instr(
                 name_of,
             );
             *asm += jmp(loop_start);
-            *asm += Text::label(loop_exit)
+            *asm += Text::label(loop_exit);
         }
-        /*For {
-            loop_var,
+        Instr::For {
+            loop_var: Some(var_decl),
             cond,
             incr,
             body,
-        } => (),*/
+        } => {
+            let block = vec![
+                DeclOrInstr::Var(var_decl),
+                DeclOrInstr::Instr(TypedInstr {
+                    instr: Instr::For {
+                        loop_var: None,
+                        cond,
+                        incr,
+                        body,
+                    },
+                    ..instr
+                }),
+            ];
+            compile_block(block, asm, variables, current_loop, name_of);
+        }
+        Instr::For {
+            loop_var: None,
+            cond,
+            incr,
+            body,
+        } => {
+            let for_start =
+                new_label(&format!("@for{}", format_span(&instr.span)));
+            let for_exit =
+                new_label(&format!("@for_exit{}", format_span(&instr.span)));
+            *asm += Text::label(for_start.clone());
+            if let Some(cond) = cond {
+                compile_expr(cond, asm, variables);
+            }
+            *asm += jz(for_exit.clone());
+            compile_instr(
+                *body,
+                asm,
+                Some((&for_start, &for_exit)),
+                variables,
+                name_of,
+            );
+            for incr_expr in incr {
+                compile_expr(incr_expr, asm, variables);
+            }
+            *asm += jmp(for_start);
+            *asm += Text::label(for_exit);
+        }
         Instr::Block(block) => {
             compile_block(block, asm, variables, current_loop, name_of)
         }

@@ -366,7 +366,7 @@ impl<U, T> TypedInstr<U, T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WithType<U, T> {
     pub inner: U,
     pub ty: T,
