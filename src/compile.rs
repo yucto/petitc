@@ -1,8 +1,8 @@
-use write_x86_64::*;
+use write_x86_64::{traits::Writable, *};
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fs::File as StdFile, io::Write, path::Path};
 
-use super::{ast::*, typechecker::*};
+use super::{ast::*, error::Result, typechecker::*};
 
 /// Push the addr of the given lvalue in %rax
 fn push_addr(
@@ -294,4 +294,50 @@ fn compile_block(
     }
 
     *asm += addq(reg!(RSP), immq(variables.len() as i64));
+}
+
+fn compile_fun(
+    fun_decl: FunDecl<TypeAnnotation>,
+    asm: &mut Text,
+    variables: &mut HashMap<usize, i64>,
+    name_of: &[String],
+) {
+    *asm += pushq(reg!(RBP));
+    *asm += movq(reg!(RBP), reg!(RSP));
+
+    let mut old_variables = Vec::new();
+    for (nb, (_, arg)) in fun_decl.params.iter().enumerate() {
+        let old = variables.insert(arg.inner, (3 + nb as i64) * 8);
+        old_variables.push((arg.inner, old));
+    }
+
+    compile_block(fun_decl.code, asm, variables, None, name_of);
+
+    for (id, old) in old_variables {
+        variables.remove(&id);
+        if let Some(old) = old {
+            variables.insert(id, old);
+        }
+    }
+}
+
+pub fn compile(
+    path: impl AsRef<Path>,
+    file: File<TypeAnnotation>,
+    name_of: &[String],
+) -> Result<()> {
+    let mut asm = Text::label(reg::Label::from_str("_start".to_owned()));
+    let mut variables = HashMap::new();
+    for fun_decl in file.fun_decls {
+        compile_fun(fun_decl.inner, &mut asm, &mut variables, name_of);
+    }
+
+    let mut f = StdFile::create(path.as_ref().with_extension(".s"))?;
+    f.write_all(b"section .text\n")?;
+    f.write_all(b"\tglobal main\n")?;
+    f.write_all(b"\tglobal putchar\n")?;
+
+    asm.write_in(&mut f)?;
+
+    Ok(())
 }

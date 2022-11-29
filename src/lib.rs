@@ -32,8 +32,9 @@ pub fn typecheck(
 }
 
 pub fn compile(
-    _p: impl AsRef<Path>,
-    _: ast::File<typechecker::TypeAnnotation>,
+    path: impl AsRef<Path>,
+    file: ast::File<typechecker::TypeAnnotation>,
+    string_store: &[String],
 ) -> () {
-    unimplemented!()
+    compile::compile(path, file, string_store).unwrap()
 }

@@ -1436,7 +1436,6 @@ fn typecheck_fun(
                 .into_iter()
                 .map(|(left, right)| (left.into(), right))
                 .collect(),
-            // TODO: properly report error
             code,
             toplevel: decl.inner.toplevel,
         },

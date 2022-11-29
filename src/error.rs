@@ -1,6 +1,6 @@
 use crate::{cwrite, cwriteln, typechecker::PartialType, typing::Type};
 use beans::{error::Error as BeansError, span::Span};
-use std::fmt;
+use std::{fmt, io::Error as IoError};
 use thiserror::Error;
 
 macro_rules! error {
@@ -119,6 +119,9 @@ impl fmt::Display for Error {
                     "The parsing engine encountered an internal error:{}",
                     other
                 )?;
+            }
+            ErrorKind::IoError(e) => {
+                writeln!(f, "The engine encountered a io error:{}", e)?
             }
             ErrorKind::NoMainFunction => {
                 error!(f, "expected to find symbol `main` at toplevel")?;
@@ -428,6 +431,7 @@ impl fmt::Display for Error {
 #[derive(Debug)]
 pub enum ErrorKind {
     Beans(BeansError),
+    IoError(IoError),
     AddressOfRvalue {
         span: Span,
         expression_span: Span,
@@ -509,6 +513,12 @@ pub enum ErrorKind {
 impl From<BeansError> for ErrorKind {
     fn from(error: BeansError) -> Self {
         Self::Beans(error)
+    }
+}
+
+impl From<IoError> for ErrorKind {
+    fn from(error: IoError) -> Self {
+        Self::IoError(error)
     }
 }
 

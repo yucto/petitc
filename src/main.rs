@@ -80,7 +80,7 @@ fn main() -> ExitCode {
         return ExitCode::from(0);
     }
 
-    petitc::compile(&args.path, typed);
+    petitc::compile(&args.path, typed, &string_store);
 
     ExitCode::from(0)
 }
