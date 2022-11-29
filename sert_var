@@ -1,0 +1,485 @@
+[1mdiff --git a/src/compile.rs b/src/compile.rs[m
+[1mindex e015364..5b03aeb 100644[m
+[1m--- a/src/compile.rs[m
+[1m+++ b/src/compile.rs[m
+[36m@@ -20,15 +20,6 @@[m [mfn push_addr([m
+     }[m
+ }[m
+ [m
+[31m-fn format_span(span: &beans::span::Span) -> String {[m
+[31m-    let start_loc = span.start();[m
+[31m-    let end_loc = span.end();[m
+[31m-    format!([m
+[31m-        "{}.{}-{}.{}",[m
+[31m-        start_loc.0, start_loc.1, end_loc.0, end_loc.1[m
+[31m-    )[m
+[31m-}[m
+[31m-[m
+ /// Push the expression in %rax[m
+ fn compile_expr([m
+     e: TypedExpr,[m
+[1mdiff --git a/src/lib.rs b/src/lib.rs[m
+[1mindex 0635b85..c3b81c7 100644[m
+[1m--- a/src/lib.rs[m
+[1m+++ b/src/lib.rs[m
+[36m@@ -26,7 +26,7 @@[m [mpub fn parse([m
+ pub fn typecheck([m
+     _p: impl AsRef<Path>,[m
+     file: ast::File<parsing::SpanAnnotation>,[m
+[31m-    string_store: &[String],[m
+[32m+[m[32m    string_store: &mut Vec<String>,[m
+ ) -> std::result::Result<ast::File<typechecker::TypeAnnotation>, Vec<Error>> {[m
+     typechecker::typecheck(file, string_store)[m
+ }[m
+[1mdiff --git a/src/main.rs b/src/main.rs[m
+[1mindex 1eb986d..e044387 100644[m
+[1m--- a/src/main.rs[m
+[1m+++ b/src/main.rs[m
+[36m@@ -65,7 +65,7 @@[m [mfn main() -> ExitCode {[m
+         }[m
+     }[m
+ [m
+[31m-    let (parsed, string_store) = petitc::parse(&args.path)[m
+[32m+[m[32m    let (parsed, mut string_store) = petitc::parse(&args.path)[m
+         .map_err(|err| report_errors(vec![err]))[m
+         .unwrap();[m
+ [m
+[36m@@ -73,7 +73,7 @@[m [mfn main() -> ExitCode {[m
+         return ExitCode::from(0);[m
+     }[m
+ [m
+[31m-    let typed = petitc::typecheck(&args.path, parsed, &string_store)[m
+[32m+[m[32m    let typed = petitc::typecheck(&args.path, parsed, &mut string_store)[m
+         .map_err(report_errors)[m
+         .unwrap();[m
+     if args.type_only {[m
+[1mdiff --git a/src/typechecker.rs b/src/typechecker.rs[m
+[1mindex 930787a..944cd30 100644[m
+[1m--- a/src/typechecker.rs[m
+[1m+++ b/src/typechecker.rs[m
+[36m@@ -23,6 +23,15 @@[m [mfn get_errors() -> Vec<Error> {[m
+     unsafe { std::mem::take(&mut ERRORS) }[m
+ }[m
+ [m
+[32m+[m[32mpub fn format_span(span: &beans::span::Span) -> String {[m
+[32m+[m[32m    let start_loc = span.start();[m
+[32m+[m[32m    let end_loc = span.end();[m
+[32m+[m[32m    format!([m
+[32m+[m[32m        "{}.{}-{}.{}",[m
+[32m+[m[32m        start_loc.0, start_loc.1, end_loc.0, end_loc.1[m
+[32m+[m[32m    )[m
+[32m+[m[32m}[m
+[32m+[m
+ pub(crate) type PartialType = Type<PartialBasisType>;[m
+ [m
+ #[derive(Debug, Clone, Copy, PartialEq)][m
+[36m@@ -430,18 +439,25 @@[m [menum Binding {[m
+     /// (type, depth)[m
+     Var(PartialType, usize),[m
+     /// (return type, arguments type)[m
+[31m-    Fun((PartialType, Vec<PartialType>)),[m
+[32m+[m[32m    Fun(PartialType, Vec<PartialType>),[m
+ }[m
+ [m
+[31m-type Environment = HashMap<Ident, (Binding, Option<Span>)>;[m
+[32m+[m[32m/// old name <=> var/fun, pos (if different from malloc and puchar), new name[m
+[32m+[m[32mtype Environment = HashMap<Ident, (Binding, Option<Span>, Ident)>;[m
+ [m
+ fn get_fun<'env>([m
+     env: &'env Environment,[m
+     ident: WithSpan<Ident>,[m
+     name_of: &'_ [String],[m
+[31m-) -> Result<(&'env (PartialType, Vec<PartialType>), &'env Option<Span>)> {[m
+[31m-    if let Some((Binding::Fun(res), span)) = env.get(&ident.inner) {[m
+[31m-        Ok((res, span))[m
+[32m+[m[32m) -> Result<([m
+[32m+[m[32m    (PartialType, &'env [PartialType]),[m
+[32m+[m[32m    &'env Option<Span>,[m
+[32m+[m[32m    Ident,[m
+[32m+[m[32m)> {[m
+[32m+[m[32m    if let Some((Binding::Fun(ty, args), span, new_name)) =[m
+[32m+[m[32m        env.get(&ident.inner)[m
+[32m+[m[32m    {[m
+[32m+[m[32m        Ok(((*ty, &args), span, *new_name))[m
+     } else {[m
+         Err(Error::new(ErrorKind::NameError {[m
+             name: name_of[ident.inner].clone(),[m
+[36m@@ -454,9 +470,10 @@[m [mfn get_var([m
+     env: &Environment,[m
+     ident: WithSpan<Ident>,[m
+     name_of: &[String],[m
+[31m-) -> Result<(PartialType, usize)> {[m
+[31m-    if let Some((Binding::Var(ty, depth), _)) = env.get(&ident.inner) {[m
+[31m-        Ok((*ty, *depth))[m
+[32m+[m[32m) -> Result<(PartialType, usize, Ident)> {[m
+[32m+[m[32m    if let Some((Binding::Var(ty, depth), _, new_name)) = env.get(&ident.inner)[m
+[32m+[m[32m    {[m
+[32m+[m[32m        Ok((*ty, *depth, *new_name))[m
+     } else {[m
+         Err(Error::new(ErrorKind::NameError {[m
+             name: name_of[ident.inner].clone(),[m
+[36m@@ -465,6 +482,50 @@[m [mfn get_var([m
+     }[m
+ }[m
+ [m
+[32m+[m[32mfn insert_new_fun<'env>([m
+[32m+[m[32m    env: &'env mut Environment,[m
+[32m+[m[32m    ident: Ident,[m
+[32m+[m[32m    fun_binding: (PartialType, Vec<PartialType>),[m
+[32m+[m[32m    span: Option<Span>,[m
+[32m+[m[32m    name_of: &'_ mut Vec<String>,[m
+[32m+[m[32m) -> Ident {[m
+[32m+[m[32m    let new_name_str = format!([m
+[32m+[m[32m        "{}{}",[m
+[32m+[m[32m        name_of[ident],[m
+[32m+[m[32m        span.as_ref()[m
+[32m+[m[32m            .map(format_span)[m
+[32m+[m[32m            .unwrap_or_else(|| "".to_string())[m
+[32m+[m[32m    );[m
+[32m+[m[32m    let new_name = name_of.len();[m
+[32m+[m[32m    name_of.push(new_name_str);[m
+[32m+[m[32m    env.insert([m
+[32m+[m[32m        ident,[m
+[32m+[m[32m        (Binding::Fun(fun_binding.0, fun_binding.1), span, new_name),[m
+[32m+[m[32m    );[m
+[32m+[m[32m    new_name[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfn insert_new_var<'env>([m
+[32m+[m[32m    env: &'env mut Environment,[m
+[32m+[m[32m    ident: Ident,[m
+[32m+[m[32m    var_binding: (PartialType, usize),[m
+[32m+[m[32m    span: Span,[m
+[32m+[m[32m    name_of: &'_ mut Vec<String>,[m
+[32m+[m[32m) -> Ident {[m
+[32m+[m[32m    let new_name_str = format!("{}{}", name_of[ident], format_span(&span));[m
+[32m+[m[32m    let new_name = name_of.len();[m
+[32m+[m[32m    name_of.push(new_name_str);[m
+[32m+[m[32m    env.insert([m
+[32m+[m[32m        ident,[m
+[32m+[m[32m        ([m
+[32m+[m[32m            Binding::Var(var_binding.0, var_binding.1),[m
+[32m+[m[32m            Some(span),[m
+[32m+[m[32m            new_name,[m
+[32m+[m[32m        ),[m
+[32m+[m[32m    );[m
+[32m+[m[32m    new_name[m
+[32m+[m[32m}[m
+[32m+[m
+ fn type_expr([m
+     e: WithSpan<Expr<SpanAnnotation>>,[m
+     depth: usize,[m
+[36m@@ -485,13 +546,17 @@[m [mfn type_expr([m
+             WithType::new(Some(Expr::Int(n)), PartialType::INT, e.span)[m
+         }[m
+         Expr::Ident(name) => {[m
+[31m-            let (ty, depth) = get_var(env, name.clone(), name_of)[m
+[32m+[m[32m            let (ty, depth, new_name) = get_var(env, name.clone(), name_of)[m
+                 .unwrap_or_else(|error| {[m
+                     report_error(error);[m
+[31m-                    (PartialType::ERROR, usize::MAX)[m
+[32m+[m[32m                    (PartialType::ERROR, usize::MAX, name.inner)[m
+                 });[m
+             WithType::new([m
+[31m-                Some(Expr::Ident(DepthIdent::from_spanned(name, depth))),[m
+[32m+[m[32m                Some(Expr::Ident(DepthIdent {[m
+[32m+[m[32m                    inner: new_name,[m
+[32m+[m[32m                    span: name.span,[m
+[32m+[m[32m                    depth,[m
+[32m+[m[32m                })),[m
+                 ty,[m
+                 e.span,[m
+             )[m
+[36m@@ -909,7 +974,7 @@[m [mfn type_expr([m
+             WithType::new(Some(new_e), ret_type, e.span)[m
+         }[m
+         Expr::Call { name, args } => {[m
+[31m-            let ((ret_ty, args_ty), fun_span) =[m
+[32m+[m[32m            let ((ret_ty, args_ty), fun_span, new_name) =[m
+                 match get_fun(env, name.clone(), name_of) {[m
+                     Ok(stuff) => stuff,[m
+                     Err(error) => {[m
+[36m@@ -947,10 +1012,14 @@[m [mfn type_expr([m
+ [m
+             WithType::new([m
+                 Some(Expr::Call {[m
+[31m-                    name: DepthIdent::from_spanned(name, depth),[m
+[32m+[m[32m                    name: DepthIdent {[m
+[32m+[m[32m                        inner: new_name,[m
+[32m+[m[32m                        span: name.span,[m
+[32m+[m[32m                        depth,[m
+[32m+[m[32m                    },[m
+                     args: typed_args,[m
+                 }),[m
+[31m-                *ret_ty,[m
+[32m+[m[32m                ret_ty,[m
+                 e.span,[m
+             )[m
+         }[m
+[36m@@ -964,7 +1033,7 @@[m [mfn typecheck_instr([m
+     depth: usize,[m
+     expected_return_type: PartialType,[m
+     env: &mut Environment,[m
+[31m-    name_of: &[String],[m
+[32m+[m[32m    name_of: &mut Vec<String>,[m
+ ) -> TypedInstr<Instr<PartialTypeAnnotation>, PartialType> {[m
+     match instr.inner {[m
+         Instr::EmptyInstr => TypedInstr {[m
+[36m@@ -1220,6 +1289,27 @@[m [mfn typecheck_instr([m
+     }[m
+ }[m
+ [m
+[32m+[m[32m// Useful only in typecheck_block[m
+[32m+[m[32mfn assert_var_is_not_reused([m
+[32m+[m[32m    var_name: WithSpan<Ident>,[m
+[32m+[m[32m    new_bindings: &[(DepthIdent, Option<(Binding, Ident)>)],[m
+[32m+[m[32m    name_of: &[String],[m
+[32m+[m[32m) -> Result<()> {[m
+[32m+[m[32m    if let Some((_, first_definition_span)) = new_bindings[m
+[32m+[m[32m        .iter()[m
+[32m+[m[32m        .map(|(DepthIdent { inner, span, .. }, _)| (*inner, span))[m
+[32m+[m[32m        .find(|(name, _)| *name == var_name.inner)[m
+[32m+[m[32m    {[m
+[32m+[m[32m        Err(Error::new(ErrorKind::SymbolDefinedTwice {[m
+[32m+[m[32m            first_definition: first_definition_span.clone(),[m
+[32m+[m[32m            second_definition: var_name.span,[m
+[32m+[m[32m            name: name_of[var_name.inner].clone(),[m
+[32m+[m[32m        }))[m
+[32m+[m[32m    } else {[m
+[32m+[m[32m        Ok(())[m
+[32m+[m[32m    }[m
+[32m+[m[32m}[m
+[32m+[m
+ /// Always returns a block[m
+ fn typecheck_block([m
+     block: Block<SpanAnnotation>,[m
+[36m@@ -1227,31 +1317,11 @@[m [mfn typecheck_block([m
+     depth: usize,[m
+     expected_return_type: PartialType,[m
+     env: &mut Environment,[m
+[31m-    name_of: &[String],[m
+[32m+[m[32m    name_of: &mut Vec<String>,[m
+ ) -> TypedInstr<Instr<PartialTypeAnnotation>, PartialType> {[m
+[31m-    let mut new_bindings: Vec<(DepthIdent, Option<Binding>)> = Vec::new();[m
+[32m+[m[32m    let mut new_bindings = Vec::new();[m
+     let mut ret = Vec::new();[m
+ [m
+[31m-    fn assert_var_is_not_reused([m
+[31m-        var_name: WithSpan<Ident>,[m
+[31m-        new_bindings: &[(DepthIdent, Option<Binding>)],[m
+[31m-        name_of: &[String],[m
+[31m-    ) -> Result<()> {[m
+[31m-        if let Some((_, first_definition_span)) = new_bindings[m
+[31m-            .iter()[m
+[31m-            .map(|(DepthIdent { inner, span, .. }, _)| (*inner, span))[m
+[31m-            .find(|(name, _)| *name == var_name.inner)[m
+[31m-        {[m
+[31m-            Err(Error::new(ErrorKind::SymbolDefinedTwice {[m
+[31m-                first_definition: first_definition_span.clone(),[m
+[31m-                second_definition: var_name.span,[m
+[31m-                name: name_of[var_name.inner].clone(),[m
+[31m-            }))[m
+[31m-        } else {[m
+[31m-            Ok(())[m
+[31m-        }[m
+[31m-    }[m
+[31m-[m
+     for decl_or_instr in block.inner {[m
+         match decl_or_instr {[m
+             DeclOrInstr::Fun(fun_decl) => {[m
+[36m@@ -1266,26 +1336,27 @@[m [mfn typecheck_block([m
+                 ) {[m
+                     report_error(error);[m
+                 };[m
+[31m-                let fun_decl = typecheck_fun(fun_decl, env, name_of);[m
+[32m+[m[32m                let mut fun_decl = typecheck_fun(fun_decl, env, name_of);[m
+                 new_bindings.push(([m
+                     fun_decl.inner.name.clone(),[m
+[31m-                    env.remove(&fun_decl.inner.name.inner).map(|x| x.0),[m
+[32m+[m[32m                    env.remove(&fun_decl.inner.name.inner).map(|x| (x.0, x.2)),[m
+                 ));[m
+[31m-                env.insert([m
+[32m+[m[32m                let new_name = insert_new_fun([m
+[32m+[m[32m                    env,[m
+                     fun_decl.inner.name.inner,[m
+                     ([m
+[31m-                        Binding::Fun(([m
+[31m-                            fun_decl.inner.ty.inner.clone(),[m
+[31m-                            fun_decl[m
+[31m-                                .inner[m
+[31m-                                .params[m
+[31m-                                .iter()[m
+[31m-                                .map(|(ty, _)| ty.inner.clone())[m
+[31m-                                .collect(),[m
+[31m-                        )),[m
+[31m-                        Some(fun_decl.span.clone()),[m
+[32m+[m[32m                        fun_decl.inner.ty.inner.clone(),[m
+[32m+[m[32m                        fun_decl[m
+[32m+[m[32m                            .inner[m
+[32m+[m[32m                            .params[m
+[32m+[m[32m                            .iter()[m
+[32m+[m[32m                            .map(|(ty, _)| ty.inner.clone())[m
+[32m+[m[32m                            .collect(),[m
+                     ),[m
+[32m+[m[32m                    Some(fun_decl.span.clone()),[m
+[32m+[m[32m                    name_of,[m
+                 );[m
+[32m+[m[32m                fun_decl.inner.name.inner = new_name;[m
+                 ret.push(DeclOrInstr::Fun(fun_decl));[m
+             }[m
+             DeclOrInstr::Var(var_decl) => {[m
+[36m@@ -1306,6 +1377,9 @@[m [mfn typecheck_block([m
+                 ) {[m
+                     report_error(error)[m
+                 };[m
+[32m+[m
+[32m+[m[32m                // We insert the variable name in the environment before we typecheck the[m
+[32m+[m[32m                // potential value, because `int x = e;` <=> `int x; x = e;`[m
+                 new_bindings.push(([m
+                     DepthIdent::from_spanned([m
+                         var_decl[m
+[36m@@ -1315,18 +1389,16 @@[m [mfn typecheck_block([m
+                             .with_span(var_decl.span.clone()),[m
+                         depth,[m
+                     ),[m
+[31m-                    env.remove(&var_decl.inner.name.inner).map(|x| x.0),[m
+[32m+[m[32m                    env.remove(&var_decl.inner.name.inner).map(|x| (x.0, x.2)),[m
+                 ));[m
+[31m-                env.insert([m
+[32m+[m[32m                let new_name = insert_new_var([m
+[32m+[m[32m                    env,[m
+                     var_decl.inner.name.inner,[m
+[31m-                    ([m
+[31m-                        Binding::Var([m
+[31m-                            var_decl.inner.ty.inner.from_basic(),[m
+[31m-                            depth,[m
+[31m-                        ),[m
+[31m-                        Some(var_decl.span.clone()),[m
+[31m-                    ),[m
+[32m+[m[32m                    (var_decl.inner.ty.inner.from_basic(), depth),[m
+[32m+[m[32m                    var_decl.span.clone(),[m
+[32m+[m[32m                    name_of,[m
+                 );[m
+[32m+[m
+                 let value = var_decl[m
+                     .inner[m
+                     .value[m
+[36m@@ -1356,10 +1428,11 @@[m [mfn typecheck_block([m
+                 ret.push(DeclOrInstr::Var(WithSpan::new([m
+                     VarDecl {[m
+                         ty: var_decl.inner.ty.into(),[m
+[31m-                        name: DepthIdent::from_spanned([m
+[31m-                            var_decl.inner.name,[m
+[32m+[m[32m                        name: DepthIdent {[m
+[32m+[m[32m                            inner: new_name,[m
+[32m+[m[32m                            span: var_decl.inner.name.span,[m
+                             depth,[m
+[31m-                        ),[m
+[32m+[m[32m                        },[m
+                         value,[m
+                     },[m
+                     var_decl.span,[m
+[36m@@ -1381,8 +1454,8 @@[m [mfn typecheck_block([m
+     let mut declared_vars = Vec::new();[m
+ [m
+     for (name, old_binding) in new_bindings {[m
+[31m-        if let Some(binding) = old_binding {[m
+[31m-            env.insert(name.inner, (binding, Some(name.span)));[m
+[32m+[m[32m        if let Some((binding, new_name)) = old_binding {[m
+[32m+[m[32m            env.insert(name.inner, (binding, Some(name.span), new_name));[m
+         } else {[m
+             env.remove(&name.inner);[m
+         }[m
+[36m@@ -1407,7 +1480,7 @@[m [mfn typecheck_block([m
+ fn typecheck_fun([m
+     decl: WithSpan<FunDecl<SpanAnnotation>>,[m
+     env: &mut Environment,[m
+[31m-    name_of: &[String],[m
+[32m+[m[32m    name_of: &mut Vec<String>,[m
+ ) -> WithSpan<FunDecl<PartialTypeAnnotation>> {[m
+     let code = decl[m
+         .inner[m
+[36m@@ -1426,19 +1499,19 @@[m [mfn typecheck_fun([m
+         .chain(decl.inner.code.inner.into_iter())[m
+         .collect::<Vec<_>>();[m
+ [m
+[31m-    env.insert([m
+[32m+[m[32m    let new_name = insert_new_fun([m
+[32m+[m[32m        env,[m
+         decl.inner.name.inner,[m
+         ([m
+[31m-            Binding::Fun(([m
+[31m-                decl.inner.ty.inner.from_basic(),[m
+[31m-                decl.inner[m
+[31m-                    .params[m
+[31m-                    .iter()[m
+[31m-                    .map(|(ty, _)| ty.inner.from_basic())[m
+[31m-                    .collect(),[m
+[31m-            )),[m
+[31m-            Some(decl.span.clone()),[m
+[32m+[m[32m            decl.inner.ty.inner.from_basic(),[m
+[32m+[m[32m            decl.inner[m
+[32m+[m[32m                .params[m
+[32m+[m[32m                .iter()[m
+[32m+[m[32m                .map(|(ty, _)| ty.inner.from_basic())[m
+[32m+[m[32m                .collect(),[m
+         ),[m
+[32m+[m[32m        Some(decl.span.clone()),[m
+[32m+[m[32m        name_of,[m
+     );[m
+ [m
+     let typed_instr = typecheck_block([m
+[36m@@ -1464,7 +1537,11 @@[m [mfn typecheck_fun([m
+     WithSpan::new([m
+         FunDecl {[m
+             ty: decl.inner.ty.into(),[m
+[31m-            name: DepthIdent::from_spanned(decl.inner.name, decl.inner.depth),[m
+[32m+[m[32m            name: DepthIdent {[m
+[32m+[m[32m                inner: new_name,[m
+[32m+[m[32m                span: decl.inner.name.span,[m
+[32m+[m[32m                depth: decl.inner.depth,[m
+[32m+[m[32m            },[m
+             params: decl[m
+                 .inner[m
+                 .params[m
+[36m@@ -1485,7 +1562,7 @@[m [mfn typecheck_fun([m
+ [m
+ pub fn typecheck([m
+     file: File<SpanAnnotation>,[m
+[31m-    name_of: &[String],[m
+[32m+[m[32m    name_of: &mut Vec<String>,[m
+ ) -> std::result::Result<File<TypeAnnotation>, Vec<Error>> {[m
+     if let Some(WithSpan {[m
+         inner: main_decl,[m
+[36m@@ -1511,24 +1588,28 @@[m [mpub fn typecheck([m
+     };[m
+ [m
+     let mut env = HashMap::new();[m
+[32m+[m[32m    // malloc[m
+     env.insert([m
+         0,[m
+         ([m
+[31m-            Binding::Fun((PartialType::VOID.ptr(), vec![PartialType::INT])),[m
+[32m+[m[32m            Binding::Fun(PartialType::VOID.ptr(), vec![PartialType::INT]),[m
+             None,[m
+[32m+[m[32m            0,[m
+         ),[m
+     );[m
+[32m+[m[32m    // putchar[m
+     env.insert([m
+         1,[m
+         ([m
+[31m-            Binding::Fun((PartialType::INT, vec![PartialType::INT])),[m
+[32m+[m[32m            Binding::Fun(PartialType::INT, vec![PartialType::INT]),[m
+             None,[m
+[32m+[m[32m            1,[m
+         ),[m
+     );[m
+     let mut fun_decls = Vec::new();[m
+ [m
+     for decl in file.fun_decls {[m
+[31m-        if let Ok((_, first_definition)) = get_fun([m
+[32m+[m[32m        if let Ok((_, first_definition, _)) = get_fun([m
+             &env,[m
+             decl.inner.name.clone().with_span(decl.span.clone()),[m
+             name_of,[m

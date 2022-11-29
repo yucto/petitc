@@ -65,7 +65,7 @@ fn main() -> ExitCode {
         }
     }
 
-    let (parsed, string_store) = petitc::parse(&args.path)
+    let (parsed, mut string_store) = petitc::parse(&args.path)
         .map_err(|err| report_errors(vec![err]))
         .unwrap();
 
@@ -73,7 +73,7 @@ fn main() -> ExitCode {
         return ExitCode::from(0);
     }
 
-    let typed = petitc::typecheck(&args.path, parsed, &string_store)
+    let typed = petitc::typecheck(&args.path, parsed, &mut string_store)
         .map_err(report_errors)
         .unwrap();
     if args.type_only {

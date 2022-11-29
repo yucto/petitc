@@ -20,15 +20,6 @@ fn push_addr(
     }
 }
 
-fn format_span(span: &beans::span::Span) -> String {
-    let start_loc = span.start();
-    let end_loc = span.end();
-    format!(
-        "{}.{}-{}.{}",
-        start_loc.0, start_loc.1, end_loc.0, end_loc.1
-    )
-}
-
 /// Push the expression in %rax
 fn compile_expr(
     e: TypedExpr,

@@ -23,6 +23,15 @@ fn get_errors() -> Vec<Error> {
     unsafe { std::mem::take(&mut ERRORS) }
 }
 
+pub fn format_span(span: &beans::span::Span) -> String {
+    let start_loc = span.start();
+    let end_loc = span.end();
+    format!(
+        "{}.{}-{}.{}",
+        start_loc.0, start_loc.1, end_loc.0, end_loc.1
+    )
+}
+
 pub(crate) type PartialType = Type<PartialBasisType>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -430,18 +439,25 @@ enum Binding {
     /// (type, depth)
     Var(PartialType, usize),
     /// (return type, arguments type)
-    Fun((PartialType, Vec<PartialType>)),
+    Fun(PartialType, Vec<PartialType>),
 }
 
-type Environment = HashMap<Ident, (Binding, Option<Span>)>;
+/// old name <=> var/fun, pos (if different from malloc and putchar), new name
+type Environment = HashMap<Ident, (Binding, Option<Span>, Ident)>;
 
 fn get_fun<'env>(
     env: &'env Environment,
     ident: WithSpan<Ident>,
     name_of: &'_ [String],
-) -> Result<(&'env (PartialType, Vec<PartialType>), &'env Option<Span>)> {
-    if let Some((Binding::Fun(res), span)) = env.get(&ident.inner) {
-        Ok((res, span))
+) -> Result<(
+    (PartialType, &'env [PartialType]),
+    &'env Option<Span>,
+    Ident,
+)> {
+    if let Some((Binding::Fun(ty, args), span, new_name)) =
+        env.get(&ident.inner)
+    {
+        Ok(((*ty, &args), span, *new_name))
     } else {
         Err(Error::new(ErrorKind::NameError {
             name: name_of[ident.inner].clone(),
@@ -454,15 +470,60 @@ fn get_var(
     env: &Environment,
     ident: WithSpan<Ident>,
     name_of: &[String],
-) -> Result<(PartialType, usize)> {
-    if let Some((Binding::Var(ty, depth), _)) = env.get(&ident.inner) {
-        Ok((*ty, *depth))
+) -> Result<(PartialType, usize, Ident)> {
+    if let Some((Binding::Var(ty, depth), _, new_name)) = env.get(&ident.inner)
+    {
+        Ok((*ty, *depth, *new_name))
     } else {
         Err(Error::new(ErrorKind::NameError {
             name: name_of[ident.inner].clone(),
             span: ident.span,
         }))
     }
+}
+
+fn insert_new_fun<'env>(
+    env: &'env mut Environment,
+    ident: Ident,
+    fun_binding: (PartialType, Vec<PartialType>),
+    span: Option<Span>,
+    name_of: &'_ mut Vec<String>,
+) -> Ident {
+    let new_name_str = format!(
+        "{}{}",
+        name_of[ident],
+        span.as_ref()
+            .map(format_span)
+            .unwrap_or_else(|| "".to_string())
+    );
+    let new_name = name_of.len();
+    name_of.push(new_name_str);
+    env.insert(
+        ident,
+        (Binding::Fun(fun_binding.0, fun_binding.1), span, new_name),
+    );
+    new_name
+}
+
+fn insert_new_var<'env>(
+    env: &'env mut Environment,
+    ident: Ident,
+    var_binding: (PartialType, usize),
+    span: Span,
+    name_of: &'_ mut Vec<String>,
+) -> Ident {
+    let new_name_str = format!("{}{}", name_of[ident], format_span(&span));
+    let new_name = name_of.len();
+    name_of.push(new_name_str);
+    env.insert(
+        ident,
+        (
+            Binding::Var(var_binding.0, var_binding.1),
+            Some(span),
+            new_name,
+        ),
+    );
+    new_name
 }
 
 fn type_expr(
@@ -485,13 +546,17 @@ fn type_expr(
             WithType::new(Some(Expr::Int(n)), PartialType::INT, e.span)
         }
         Expr::Ident(name) => {
-            let (ty, depth) = get_var(env, name.clone(), name_of)
+            let (ty, depth, new_name) = get_var(env, name.clone(), name_of)
                 .unwrap_or_else(|error| {
                     report_error(error);
-                    (PartialType::ERROR, usize::MAX)
+                    (PartialType::ERROR, usize::MAX, name.inner)
                 });
             WithType::new(
-                Some(Expr::Ident(DepthIdent::from_spanned(name, depth))),
+                Some(Expr::Ident(DepthIdent {
+                    inner: new_name,
+                    span: name.span,
+                    depth,
+                })),
                 ty,
                 e.span,
             )
@@ -909,7 +974,7 @@ fn type_expr(
             WithType::new(Some(new_e), ret_type, e.span)
         }
         Expr::Call { name, args } => {
-            let ((ret_ty, args_ty), fun_span) =
+            let ((ret_ty, args_ty), fun_span, new_name) =
                 match get_fun(env, name.clone(), name_of) {
                     Ok(stuff) => stuff,
                     Err(error) => {
@@ -947,10 +1012,14 @@ fn type_expr(
 
             WithType::new(
                 Some(Expr::Call {
-                    name: DepthIdent::from_spanned(name, depth),
+                    name: DepthIdent {
+                        inner: new_name,
+                        span: name.span,
+                        depth,
+                    },
                     args: typed_args,
                 }),
-                *ret_ty,
+                ret_ty,
                 e.span,
             )
         }
@@ -964,7 +1033,7 @@ fn typecheck_instr(
     depth: usize,
     expected_return_type: PartialType,
     env: &mut Environment,
-    name_of: &[String],
+    name_of: &mut Vec<String>,
 ) -> TypedInstr<Instr<PartialTypeAnnotation>, PartialType> {
     match instr.inner {
         Instr::EmptyInstr => TypedInstr {
@@ -1220,6 +1289,27 @@ fn typecheck_instr(
     }
 }
 
+// Useful only in typecheck_block
+fn assert_var_is_not_reused(
+    var_name: WithSpan<Ident>,
+    new_bindings: &[(WithSpan<Ident>, Option<(Binding, Ident)>)],
+    name_of: &[String],
+) -> Result<()> {
+    if let Some((_, first_definition_span)) = new_bindings
+        .iter()
+        .map(|(WithSpan { inner, span, .. }, _)| (*inner, span))
+        .find(|(name, _)| *name == var_name.inner)
+    {
+        Err(Error::new(ErrorKind::SymbolDefinedTwice {
+            first_definition: first_definition_span.clone(),
+            second_definition: var_name.span,
+            name: name_of[var_name.inner].clone(),
+        }))
+    } else {
+        Ok(())
+    }
+}
+
 /// Always returns a block
 fn typecheck_block(
     block: Block<SpanAnnotation>,
@@ -1227,30 +1317,10 @@ fn typecheck_block(
     depth: usize,
     expected_return_type: PartialType,
     env: &mut Environment,
-    name_of: &[String],
+    name_of: &mut Vec<String>,
 ) -> TypedInstr<Instr<PartialTypeAnnotation>, PartialType> {
-    let mut new_bindings: Vec<(DepthIdent, Option<Binding>)> = Vec::new();
+    let mut new_bindings = Vec::new();
     let mut ret = Vec::new();
-
-    fn assert_var_is_not_reused(
-        var_name: WithSpan<Ident>,
-        new_bindings: &[(DepthIdent, Option<Binding>)],
-        name_of: &[String],
-    ) -> Result<()> {
-        if let Some((_, first_definition_span)) = new_bindings
-            .iter()
-            .map(|(DepthIdent { inner, span, .. }, _)| (*inner, span))
-            .find(|(name, _)| *name == var_name.inner)
-        {
-            Err(Error::new(ErrorKind::SymbolDefinedTwice {
-                first_definition: first_definition_span.clone(),
-                second_definition: var_name.span,
-                name: name_of[var_name.inner].clone(),
-            }))
-        } else {
-            Ok(())
-        }
-    }
 
     for decl_or_instr in block.inner {
         match decl_or_instr {
@@ -1266,26 +1336,12 @@ fn typecheck_block(
                 ) {
                     report_error(error);
                 };
-                let fun_decl = typecheck_fun(fun_decl, env, name_of);
                 new_bindings.push((
                     fun_decl.inner.name.clone(),
-                    env.remove(&fun_decl.inner.name.inner).map(|x| x.0),
+                    env.remove(&fun_decl.inner.name.inner).map(|x| (x.0, x.2)),
                 ));
-                env.insert(
-                    fun_decl.inner.name.inner,
-                    (
-                        Binding::Fun((
-                            fun_decl.inner.ty.inner.clone(),
-                            fun_decl
-                                .inner
-                                .params
-                                .iter()
-                                .map(|(ty, _)| ty.inner.clone())
-                                .collect(),
-                        )),
-                        Some(fun_decl.span.clone()),
-                    ),
-                );
+                // typecheck_fun insert the declaration in env
+                let fun_decl = typecheck_fun(fun_decl, env, name_of);
                 ret.push(DeclOrInstr::Fun(fun_decl));
             }
             DeclOrInstr::Var(var_decl) => {
@@ -1306,27 +1362,25 @@ fn typecheck_block(
                 ) {
                     report_error(error)
                 };
+
+                // We insert the variable name in the environment before we typecheck the
+                // potential value, because `int x = e;` <=> `int x; x = e;`
                 new_bindings.push((
-                    DepthIdent::from_spanned(
-                        var_decl
-                            .inner
-                            .name
-                            .clone()
-                            .with_span(var_decl.span.clone()),
-                        depth,
-                    ),
-                    env.remove(&var_decl.inner.name.inner).map(|x| x.0),
+                    var_decl
+                        .inner
+                        .name
+                        .clone()
+                        .with_span(var_decl.span.clone()),
+                    env.remove(&var_decl.inner.name.inner).map(|x| (x.0, x.2)),
                 ));
-                env.insert(
+                let new_name = insert_new_var(
+                    env,
                     var_decl.inner.name.inner,
-                    (
-                        Binding::Var(
-                            var_decl.inner.ty.inner.from_basic(),
-                            depth,
-                        ),
-                        Some(var_decl.span.clone()),
-                    ),
+                    (var_decl.inner.ty.inner.from_basic(), depth),
+                    var_decl.span.clone(),
+                    name_of,
                 );
+
                 let value = var_decl
                     .inner
                     .value
@@ -1356,10 +1410,11 @@ fn typecheck_block(
                 ret.push(DeclOrInstr::Var(WithSpan::new(
                     VarDecl {
                         ty: var_decl.inner.ty.into(),
-                        name: DepthIdent::from_spanned(
-                            var_decl.inner.name,
+                        name: DepthIdent {
+                            inner: new_name,
+                            span: var_decl.inner.name.span,
                             depth,
-                        ),
+                        },
                         value,
                     },
                     var_decl.span,
@@ -1381,8 +1436,8 @@ fn typecheck_block(
     let mut declared_vars = Vec::new();
 
     for (name, old_binding) in new_bindings {
-        if let Some(binding) = old_binding {
-            env.insert(name.inner, (binding, Some(name.span)));
+        if let Some((binding, new_name)) = old_binding {
+            env.insert(name.inner, (binding, Some(name.span), new_name));
         } else {
             env.remove(&name.inner);
         }
@@ -1401,13 +1456,13 @@ fn typecheck_block(
     }
 }
 
-/// Insert the function in fun_env
+/// Insert the function in env
 /// Caller should remove it later if needed,
 /// and save previous value
 fn typecheck_fun(
     decl: WithSpan<FunDecl<SpanAnnotation>>,
     env: &mut Environment,
-    name_of: &[String],
+    name_of: &mut Vec<String>,
 ) -> WithSpan<FunDecl<PartialTypeAnnotation>> {
     let code = decl
         .inner
@@ -1426,19 +1481,19 @@ fn typecheck_fun(
         .chain(decl.inner.code.inner.into_iter())
         .collect::<Vec<_>>();
 
-    env.insert(
+    let new_name = insert_new_fun(
+        env,
         decl.inner.name.inner,
         (
-            Binding::Fun((
-                decl.inner.ty.inner.from_basic(),
-                decl.inner
-                    .params
-                    .iter()
-                    .map(|(ty, _)| ty.inner.from_basic())
-                    .collect(),
-            )),
-            Some(decl.span.clone()),
+            decl.inner.ty.inner.from_basic(),
+            decl.inner
+                .params
+                .iter()
+                .map(|(ty, _)| ty.inner.from_basic())
+                .collect(),
         ),
+        Some(decl.span.clone()),
+        name_of,
     );
 
     let typed_instr = typecheck_block(
@@ -1464,7 +1519,11 @@ fn typecheck_fun(
     WithSpan::new(
         FunDecl {
             ty: decl.inner.ty.into(),
-            name: DepthIdent::from_spanned(decl.inner.name, decl.inner.depth),
+            name: DepthIdent {
+                inner: new_name,
+                span: decl.inner.name.span,
+                depth: decl.inner.depth,
+            },
             params: decl
                 .inner
                 .params
@@ -1485,7 +1544,7 @@ fn typecheck_fun(
 
 pub fn typecheck(
     file: File<SpanAnnotation>,
-    name_of: &[String],
+    name_of: &mut Vec<String>,
 ) -> std::result::Result<File<TypeAnnotation>, Vec<Error>> {
     if let Some(WithSpan {
         inner: main_decl,
@@ -1511,24 +1570,28 @@ pub fn typecheck(
     };
 
     let mut env = HashMap::new();
+    // malloc
     env.insert(
         0,
         (
-            Binding::Fun((PartialType::VOID.ptr(), vec![PartialType::INT])),
+            Binding::Fun(PartialType::VOID.ptr(), vec![PartialType::INT]),
             None,
+            0,
         ),
     );
+    // putchar
     env.insert(
         1,
         (
-            Binding::Fun((PartialType::INT, vec![PartialType::INT])),
+            Binding::Fun(PartialType::INT, vec![PartialType::INT]),
             None,
+            1,
         ),
     );
     let mut fun_decls = Vec::new();
 
     for decl in file.fun_decls {
-        if let Ok((_, first_definition)) = get_fun(
+        if let Ok((_, first_definition, _)) = get_fun(
             &env,
             decl.inner.name.clone().with_span(decl.span.clone()),
             name_of,

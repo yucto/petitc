@@ -26,7 +26,7 @@ pub fn parse(
 pub fn typecheck(
     _p: impl AsRef<Path>,
     file: ast::File<parsing::SpanAnnotation>,
-    string_store: &[String],
+    string_store: &mut Vec<String>,
 ) -> std::result::Result<ast::File<typechecker::TypeAnnotation>, Vec<Error>> {
     typechecker::typecheck(file, string_store)
 }
