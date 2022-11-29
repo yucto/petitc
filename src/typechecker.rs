@@ -465,16 +465,8 @@ fn type_expr(
             WithType::new(Some(Expr::Int(n)), PartialType::INT, e.span)
         }
         Expr::Ident(name) => WithType::new(
-            Some(Expr::Ident(name)),
-            get_var(
-                env,
-                WithSpan {
-                    inner: name,
-                    span: e.span.clone(),
-                },
-                name_of,
-            )
-            .unwrap_or_else(|error| {
+            Some(Expr::Ident(name.clone())),
+            get_var(env, name, name_of).unwrap_or_else(|error| {
                 report_error(error);
                 PartialType::ERROR
             }),

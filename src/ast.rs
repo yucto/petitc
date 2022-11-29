@@ -71,7 +71,7 @@ pub enum BinOp {
 #[derive(Clone, Debug)]
 pub enum Expr<A: Annotation> {
     Int(i64), True, False, Null,
-    Ident(Ident),
+    Ident(A::Ident),
     Deref(Box<A::WrapExpr<Expr<A>>>),
     // Assign { lhs, rhs } represents lhs = rhs
     Assign { lhs: Box<A::WrapExpr<Expr<A>>>, rhs: Box<A::WrapExpr<Expr<A>>> },

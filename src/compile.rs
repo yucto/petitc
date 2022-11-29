@@ -13,7 +13,7 @@ fn push_addr(
     match e.inner {
         Expr::Ident(name) => {
             *asm += movq(reg!(RAX), reg!(RBP));
-            *asm += addq(reg!(RAX), immq(variables[&name]));
+            *asm += addq(reg!(RAX), immq(variables[&name.inner]));
         }
         Expr::Deref(e) => compile_expr(*e, asm, variables),
         _ => (),
@@ -40,7 +40,7 @@ fn compile_expr(
         Expr::True => *asm += movq(reg!(RAX), immq(1)),
         Expr::False | Expr::Null => *asm += movq(reg!(RAX), immq(0)),
         Expr::Ident(name) => {
-            *asm += movq(reg!(RAX), addr!(variables[&name], RBP))
+            *asm += movq(reg!(RAX), addr!(variables[&name.inner], RBP))
         }
         Expr::Deref(e) => {
             compile_expr(*e, asm, variables);

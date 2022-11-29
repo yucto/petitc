@@ -176,17 +176,6 @@ fn read_spanned_ident(
     }
 }
 
-fn read_ident(
-    ident: Rc<str>,
-    string_store: &mut Vec<String>,
-    string_assoc: &mut HashMap<String, usize>,
-) -> Ident {
-    *string_assoc.entry(ident.to_string()).or_insert_with(|| {
-        string_store.push(ident.to_string());
-        string_store.len() - 1
-    })
-}
-
 fn read_nonempty_list<T>(
     f: impl Fn(AST, bool, &mut Vec<String>, &mut HashMap<String, usize>) -> T,
     mut ast: AST,
@@ -396,8 +385,8 @@ fn read_expr(
         string_store,
         string_assoc,
     ))),
-    "Ident" => Expr::Ident(read_ident(
-        value!(node => "value"),
+    "Ident" => Expr::Ident(read_spanned_ident(
+        value!(node => ."value"),
         string_store,
         string_assoc,
     )),
