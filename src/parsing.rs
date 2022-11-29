@@ -177,9 +177,9 @@ fn read_spanned_ident(
 }
 
 fn read_nonempty_list<T>(
-    f: impl Fn(AST, bool, &mut Vec<String>, &mut HashMap<String, usize>) -> T,
+    f: impl Fn(AST, usize, &mut Vec<String>, &mut HashMap<String, usize>) -> T,
     mut ast: AST,
-    toplevel: bool,
+    depth: usize,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
 ) -> Vec<T> {
@@ -188,11 +188,11 @@ fn read_nonempty_list<T>(
         let mut node = node!(ast);
         match_variant! {(node) {
             "Cons" => {
-            result.push(f(get!(node, "head"), toplevel, string_store, string_assoc));
+            result.push(f(get!(node, "head"), depth, string_store, string_assoc));
             ast = get!(node, "tail");
             },
             "Nil" => {
-            result.push(f(get!(node, "head"), toplevel, string_store, string_assoc));
+            result.push(f(get!(node, "head"), depth, string_store, string_assoc));
             break;
             },
         }}
@@ -201,33 +201,33 @@ fn read_nonempty_list<T>(
 }
 
 fn read_option<T>(
-    f: impl Fn(AST, bool, &mut Vec<String>, &mut HashMap<String, usize>) -> T,
+    f: impl Fn(AST, usize, &mut Vec<String>, &mut HashMap<String, usize>) -> T,
     ast: AST,
-    toplevel: bool,
+    depth: usize,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
 ) -> Option<T> {
     let mut node = node!(ast);
     match_variant! {(node) {
     "None" => None,
-    "Some" => Some(f(get!(node, "value"), toplevel, string_store, string_assoc)),
+    "Some" => Some(f(get!(node, "value"), depth, string_store, string_assoc)),
     }}
 }
 
 fn read_list<T>(
-    f: impl Fn(AST, bool, &mut Vec<String>, &mut HashMap<String, usize>) -> T,
+    f: impl Fn(AST, usize, &mut Vec<String>, &mut HashMap<String, usize>) -> T,
     ast: AST,
-    toplevel: bool,
+    depth: usize,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
 ) -> Vec<T> {
     let mut node = node!(ast);
     read_option(
-        |ast, toplevel, string_store, string_assoc| {
-            read_nonempty_list(&f, ast, toplevel, string_store, string_assoc)
+        |ast, depth, string_store, string_assoc| {
+            read_nonempty_list(&f, ast, depth, string_store, string_assoc)
         },
         get!(node, "value"),
-        toplevel,
+        depth,
         string_store,
         string_assoc,
     )
@@ -236,48 +236,48 @@ fn read_list<T>(
 
 fn read_else(
     ast: AST,
-    toplevel: bool,
+    depth: usize,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
 ) -> WithSpan<Instr<SpanAnnotation>> {
     let mut node = node!(ast);
-    read_statement(get!(node, "else"), toplevel, string_store, string_assoc)
+    read_statement(get!(node, "else"), depth, string_store, string_assoc)
         .with_span(node.span)
 }
 
 fn read_statement(
     ast: AST,
-    toplevel: bool,
+    depth: usize,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
 ) -> WithSpan<Instr<SpanAnnotation>> {
     let mut node = node!(ast);
     match_variant! {(node) .{
     "None" => Instr::EmptyInstr,
-    "Regular" => Instr::ExprInstr(read_expr(get!(node, "stmt"), toplevel, string_store, string_assoc)),
+    "Regular" => Instr::ExprInstr(read_expr(get!(node, "stmt"), depth, string_store, string_assoc)),
     "If" => Instr::If {
-        cond: read_expr(get!(node, "condition"), toplevel, string_store, string_assoc),
-        then_branch: Box::new(read_statement(get!(node, "then"), toplevel, string_store, string_assoc)),
+        cond: read_expr(get!(node, "condition"), depth, string_store, string_assoc),
+        then_branch: Box::new(read_statement(get!(node, "then"), depth, string_store, string_assoc)),
         else_branch: Box::new(read_option(
             read_else,
             get!(node, "else"),
-            toplevel,
+            depth,
             string_store,
             string_assoc
         )),
     },
     "While" => Instr::While {
-        cond: read_expr(get!(node, "condition"), toplevel, string_store, string_assoc),
-        body: Box::new(read_statement(get!(node, "body"), toplevel, string_store, string_assoc)),
+        cond: read_expr(get!(node, "condition"), depth, string_store, string_assoc),
+        body: Box::new(read_statement(get!(node, "body"), depth, string_store, string_assoc)),
     },
     "For" => Instr::For {
-        loop_var: read_option(read_variable_declaration, get!(node, "init"), toplevel, string_store, string_assoc),
-        cond: read_option(read_expr, get!(node, "test"), toplevel, string_store, string_assoc),
-        incr: read_list(read_expr, get!(node, "step"), toplevel, string_store, string_assoc),
-        body: Box::new(read_statement(get!(node, "body"), toplevel, string_store, string_assoc)),
+        loop_var: read_option(read_variable_declaration, get!(node, "init"), depth, string_store, string_assoc),
+        cond: read_option(read_expr, get!(node, "test"), depth, string_store, string_assoc),
+        incr: read_list(read_expr, get!(node, "step"), depth, string_store, string_assoc),
+        body: Box::new(read_statement(get!(node, "body"), depth, string_store, string_assoc)),
     },
-    "Block" => Instr::Block(read_block(get!(node, "stmts"), toplevel, string_store, string_assoc)),
-    "Return" => Instr::Return(read_option(read_expr, get!(node, "value"), toplevel, string_store, string_assoc)),
+    "Block" => Instr::Block(read_block(get!(node, "stmts"), depth, string_store, string_assoc)),
+    "Return" => Instr::Return(read_option(read_expr, get!(node, "value"), depth, string_store, string_assoc)),
     "Break" => Instr::Break,
     "Continue" => Instr::Continue,
     }}
@@ -321,7 +321,7 @@ fn read_op(ast: AST) -> BinOp {
 
 fn read_expr(
     ast: AST,
-    _toplevel: bool,
+    _depth: usize,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, Ident>,
 ) -> WithSpan<Expr<SpanAnnotation>> {
@@ -330,58 +330,58 @@ fn read_expr(
     "Int" => read_int(get!(node, "value")),
     "Bool" => read_bool(get!(node, "value")),
     "Null" => Expr::Null,
-    "Through" => return read_expr(get!(node, "this"), _toplevel, string_store, string_assoc),
+    "Through" => return read_expr(get!(node, "this"), _depth, string_store, string_assoc),
     "Not" => Expr::Not(Box::new(read_expr(
         get!(node, "value"),
-        _toplevel,
+        _depth,
         string_store,
         string_assoc,
     ))),
     "Incrl" => Expr::PrefixIncr(Box::new(read_expr(
         get!(node, "value"),
-        _toplevel,
+        _depth,
         string_store,
         string_assoc,
     ))),
     "Incrr" => Expr::PostfixIncr(Box::new(read_expr(
         get!(node, "value"),
-        _toplevel,
+        _depth,
         string_store,
         string_assoc,
     ))),
     "Decrl" => Expr::PrefixDecr(Box::new(read_expr(
         get!(node, "value"),
-        _toplevel,
+        _depth,
         string_store,
         string_assoc,
     ))),
     "Decrr" => Expr::PostfixDecr(Box::new(read_expr(
         get!(node, "value"),
-        _toplevel,
+        _depth,
         string_store,
         string_assoc,
     ))),
     "Borrow" => Expr::Addr(Box::new(read_expr(
         get!(node, "value"),
-        _toplevel,
+        _depth,
         string_store,
         string_assoc,
     ))),
     "Deref" => Expr::Deref(Box::new(read_expr(
         get!(node, "value"),
-        _toplevel,
+        _depth,
         string_store,
         string_assoc,
     ))),
     "Plus" => Expr::Pos(Box::new(read_expr(
         get!(node, "value"),
-        _toplevel,
+        _depth,
         string_store,
         string_assoc,
     ))),
     "Minus" => Expr::Neg(Box::new(read_expr(
         get!(node, "value"),
-        _toplevel,
+        _depth,
         string_store,
         string_assoc,
     ))),
@@ -400,7 +400,7 @@ fn read_expr(
         args: read_list(
         read_expr,
         get!(node, "args"),
-        _toplevel,
+        _depth,
         string_store,
         string_assoc,
         ),
@@ -409,13 +409,13 @@ fn read_expr(
         op: read_op(get!(node, "op")),
         lhs: Box::new(read_expr(
         get!(node, "left"),
-        _toplevel,
+        _depth,
         string_store,
         string_assoc,
         )),
         rhs: Box::new(read_expr(
         get!(node, "right"),
-        _toplevel,
+        _depth,
         string_store,
         string_assoc,
         )),
@@ -423,13 +423,13 @@ fn read_expr(
     "Assign" => Expr::Assign {
         lhs: Box::new(read_expr(
         get!(node, "key"),
-        _toplevel,
+        _depth,
         string_store,
         string_assoc,
         )),
         rhs: Box::new(read_expr(
         get!(node, "value"),
-        _toplevel,
+        _depth,
         string_store,
         string_assoc,
         )),
@@ -439,18 +439,18 @@ fn read_expr(
 
 fn read_definition(
     ast: AST,
-    _toplevel: bool,
+    _depth: usize,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
 ) -> WithSpan<Expr<SpanAnnotation>> {
     let mut node = node!(ast);
-    read_expr(get!(node, "value"), _toplevel, string_store, string_assoc)
+    read_expr(get!(node, "value"), _depth, string_store, string_assoc)
         .with_span(node.span)
 }
 
 fn read_variable_declaration(
     ast: AST,
-    _toplevel: bool,
+    _depth: usize,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
 ) -> WithSpan<VarDecl<SpanAnnotation>> {
@@ -465,7 +465,7 @@ fn read_variable_declaration(
         value: read_option(
             read_definition,
             get!(node, "value"),
-            _toplevel,
+            _depth,
             string_store,
             string_assoc,
         ),
@@ -478,30 +478,30 @@ fn read_variable_declaration(
 
 fn read_declaration_or_statement(
     ast: AST,
-    toplevel: bool,
+    depth: usize,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
 ) -> DeclOrInstr<SpanAnnotation> {
     let mut node = node!(ast);
     match_variant! {(node) {
     "Function" => DeclOrInstr::Fun(read_fun_decl(
-        get!(node, "declaration"), false, string_store, string_assoc
+        get!(node, "declaration"), depth + 1, string_store, string_assoc
     )),
     "Declaration" => DeclOrInstr::Var(read_variable_declaration(
         get!(node, "declaration"),
-        toplevel,
+        depth,
         string_store,
         string_assoc,
     )),
     "Statement" => DeclOrInstr::Instr(read_statement(
-        get!(node, "stmt"), toplevel, string_store, string_assoc
+        get!(node, "stmt"), depth, string_store, string_assoc
     )),
     }}
 }
 
 fn read_block(
     ast: AST,
-    toplevel: bool,
+    depth: usize,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
 ) -> Block<SpanAnnotation> {
@@ -509,7 +509,7 @@ fn read_block(
     let block = read_list(
         read_declaration_or_statement,
         get!(node, "stmts"),
-        toplevel,
+        depth,
         string_store,
         string_assoc,
     );
@@ -531,7 +531,7 @@ fn read_type(ast: AST) -> WithSpan<Type> {
 
 fn read_typed_param(
     ast: AST,
-    _toplevel: bool,
+    _depth: usize,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
 ) -> (WithSpan<Type>, WithSpan<Ident>) {
@@ -544,7 +544,7 @@ fn read_typed_param(
 
 fn read_fun_decl(
     ast: AST,
-    toplevel: bool,
+    depth: usize,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
 ) -> WithSpan<FunDecl<SpanAnnotation>> {
@@ -559,17 +559,17 @@ fn read_fun_decl(
         params: read_list(
             read_typed_param,
             get!(node, "args"),
-            toplevel,
+            depth,
             string_store,
             string_assoc,
         ),
         code: read_block(
             get!(node, "block"),
-            toplevel,
+            depth,
             string_store,
             string_assoc,
         ),
-        toplevel,
+        depth,
     };
     WithSpan {
         inner: fun_decl,
@@ -588,7 +588,7 @@ fn read_file(ast: AST) -> (File<SpanAnnotation>, Vec<String>) {
             fun_decls: read_list(
                 read_fun_decl,
                 get!(node, "decls"),
-                true,
+                0,
                 &mut string_store,
                 &mut string_assoc,
             ),

@@ -42,8 +42,8 @@ pub struct FunDecl<A: Annotation> {
     pub params: Vec<(A::Type, A::Ident)>,
     /// Behave like an Instr::Block
     pub code: Block<A>,
-    /// Store wether it is declared at the toplevel or not
-    pub toplevel: bool,
+    /// Store the depth of the function declaration
+    pub depth: usize,
 }
 
 pub enum DeclOrInstr<A: Annotation> {
