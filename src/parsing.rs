@@ -2,7 +2,8 @@ use std::rc::Rc;
 use std::{collections::HashMap, path::Path};
 
 use crate::ast::{
-    Annotation, BinOp, DeclOrInstr, Expr, File, FunDecl, Ident, Instr, VarDecl,
+    Annotation, BinOp, Block, DeclOrInstr, Expr, File, FunDecl, Ident, Instr,
+    VarDecl,
 };
 use crate::error::Result;
 use crate::typechecker::PartialType;
@@ -514,7 +515,7 @@ fn read_block(
     toplevel: bool,
     string_store: &mut Vec<String>,
     string_assoc: &mut HashMap<String, usize>,
-) -> WithSpan<Vec<DeclOrInstr<SpanAnnotation>>> {
+) -> Block<SpanAnnotation> {
     let mut node = node!(ast);
     let block = read_list(
         read_declaration_or_statement,

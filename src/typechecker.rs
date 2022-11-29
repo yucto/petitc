@@ -91,7 +91,7 @@ impl Annotation for PartialTypeAnnotation {
     type Type = WithSpan<PartialType>;
     type WrapExpr<T> = WithType<Option<T>, PartialType>;
     type WrapInstr<T> = TypedInstr<T, PartialType>;
-    type WrapBlock<T> = WithSpan<T>;
+    type WrapBlock<T> = WrapTypedBlock<T>;
     type WrapFunDecl<T> = WithSpan<T>;
     type WrapVarDecl<T> = WithSpan<T>;
     type WrapElseBranch<T> = Option<TypedInstr<T, PartialType>>;
@@ -119,14 +119,7 @@ impl FunDecl<PartialTypeAnnotation> {
                 .into_iter()
                 .map(|(arg_ty, arg)| Some((arg_ty.to_full()?, arg)))
                 .collect::<Option<_>>()?,
-            code: WithSpan::new(
-                self.code
-                    .inner
-                    .into_iter()
-                    .map(|decl_or_instr| Some(decl_or_instr.to_full()?))
-                    .collect::<Option<_>>()?,
-                self.code.span,
-            ),
+            code: self.code.to_full()?,
             toplevel: self.toplevel,
         })
     }
@@ -270,12 +263,7 @@ impl Instr<PartialTypeAnnotation> {
                     .collect::<Option<_>>()?,
                 body: Box::new(body.to_full()?.map_opt(|e| e.to_full())?),
             },
-            Instr::Block(block) => Instr::Block(block.map_opt(|block| {
-                block
-                    .into_iter()
-                    .map(|decl_or_instr| Some(decl_or_instr.to_full()?))
-                    .collect::<Option<_>>()
-            })?),
+            Instr::Block(block) => Instr::Block(block.to_full()?),
             Instr::Return(None) => Instr::Return(None),
             Instr::Return(Some(value)) => {
                 Instr::Return(Some(value.to_full()?.map_opt(|e| e.to_full())?))
@@ -293,7 +281,7 @@ impl Annotation for TypeAnnotation {
     type Type = WithSpan<Type>;
     type WrapExpr<T> = WithType<T, Type>;
     type WrapInstr<T> = TypedInstr<T, Type>;
-    type WrapBlock<T> = WithSpan<T>;
+    type WrapBlock<T> = WrapTypedBlock<T>;
     type WrapFunDecl<T> = WithSpan<T>;
     type WrapVarDecl<T> = WithSpan<T>;
     type WrapElseBranch<T> = Option<TypedInstr<T, Type>>;
@@ -391,6 +379,35 @@ pub type PartiallyTypedExpr = <PartialTypeAnnotation as Annotation>::WrapExpr<
 >;
 pub type TypedExpr =
     <TypeAnnotation as Annotation>::WrapExpr<Expr<TypeAnnotation>>;
+
+pub struct WrapTypedBlock<T> {
+    pub inner: T,
+    pub span: Span,
+    /// Variables declared in the block
+    pub declared_vars: Vec<usize>,
+}
+
+impl WrapTypedBlock<Vec<DeclOrInstr<PartialTypeAnnotation>>> {
+    fn to_full(
+        self,
+    ) -> Option<WrapTypedBlock<Vec<DeclOrInstr<TypeAnnotation>>>> {
+        let WrapTypedBlock {
+            inner,
+            span,
+            declared_vars,
+        } = self;
+        let inner = inner
+            .into_iter()
+            .map(|decl_or_instr| Some(decl_or_instr.to_full()?))
+            .collect::<Option<_>>()?;
+
+        Some(WrapTypedBlock {
+            inner,
+            span,
+            declared_vars,
+        })
+    }
+}
 
 enum Binding {
     Var(PartialType),
@@ -1182,7 +1199,7 @@ fn typecheck_instr(
 
 /// Always returns a block
 fn typecheck_block(
-    block: WithSpan<Vec<DeclOrInstr<SpanAnnotation>>>,
+    block: Block<SpanAnnotation>,
     loop_level: usize,
     expected_return_type: PartialType,
     env: &mut Environment,
@@ -1227,11 +1244,7 @@ fn typecheck_block(
                 };
                 let fun_decl = typecheck_fun(fun_decl, env, name_of);
                 new_bindings.push((
-                    fun_decl
-                        .inner
-                        .name
-                        .clone()
-                        .with_span(fun_decl.span.clone()),
+                    fun_decl.inner.name.clone(),
                     env.remove(&fun_decl.inner.name.inner).map(|x| x.0),
                 ));
                 env.insert(
@@ -1330,16 +1343,24 @@ fn typecheck_block(
             }
         }
     }
+
+    let mut declared_vars = Vec::new();
+
     for (name, old_binding) in new_bindings {
         if let Some(binding) = old_binding {
             env.insert(name.inner, (binding, Some(name.span)));
         } else {
             env.remove(&name.inner);
         }
+        declared_vars.push(name.inner);
     }
 
     TypedInstr {
-        instr: Instr::Block(WithSpan::new(ret, block.span.clone())),
+        instr: Instr::Block(WrapTypedBlock {
+            inner: ret,
+            span: block.span.clone(),
+            declared_vars,
+        }),
         span: block.span,
         loop_level,
         expected_return_type,
@@ -1348,7 +1369,7 @@ fn typecheck_block(
 
 /// Insert the function in fun_env
 /// Caller should remove it later if needed,
-/// and saved previous value
+/// and save previous value
 fn typecheck_fun(
     decl: WithSpan<FunDecl<SpanAnnotation>>,
     env: &mut Environment,
@@ -1370,6 +1391,7 @@ fn typecheck_fun(
         })
         .chain(decl.inner.code.inner.into_iter())
         .collect::<Vec<_>>();
+
     env.insert(
         decl.inner.name.inner,
         (
@@ -1393,12 +1415,16 @@ fn typecheck_fun(
         name_of,
     );
 
-    let Instr::Block(code) =
+    let Instr::Block(mut code) =
         typed_instr.instr
     else { unreachable!("Internal error") };
 
-    let typed_code = code
-        .map(|code| code.into_iter().skip(decl.inner.params.len()).collect());
+    // We remove the declaration of the arguments
+    code.inner = code
+        .inner
+        .into_iter()
+        .skip(decl.inner.params.len())
+        .collect();
 
     WithSpan::new(
         FunDecl {
@@ -1411,7 +1437,7 @@ fn typecheck_fun(
                 .map(|(left, right)| (left.into(), right))
                 .collect(),
             // TODO: properly report error
-            code: typed_code,
+            code,
             toplevel: decl.inner.toplevel,
         },
         decl.span,

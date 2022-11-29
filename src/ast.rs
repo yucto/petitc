@@ -41,7 +41,7 @@ pub struct FunDecl<A: Annotation> {
     pub name: A::Ident,
     pub params: Vec<(A::Type, A::Ident)>,
     /// Behave like an Instr::Block
-    pub code: A::WrapBlock<Vec<DeclOrInstr<A>>>,
+    pub code: Block<A>,
     /// Store wether it is declared at the toplevel or not
     pub toplevel: bool,
 }
@@ -91,6 +91,9 @@ impl<A: Annotation> Expr<A> {
     }
 }
 
+#[allow(type_alias_bounds)]
+pub type Block<A: Annotation> = A::WrapBlock<Vec<DeclOrInstr<A>>>;
+
 pub enum Instr<A: Annotation> {
     /// ;
     EmptyInstr,
@@ -116,7 +119,7 @@ pub enum Instr<A: Annotation> {
         body: Box<A::WrapInstr<Instr<A>>>,
     },
     /// { body }
-    Block(A::WrapBlock<Vec<DeclOrInstr<A>>>),
+    Block(Block<A>),
     /// return (expr)?;
     Return(Option<A::WrapExpr<Expr<A>>>),
     /// break;

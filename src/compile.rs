@@ -2,8 +2,6 @@ use write_x86_64::*;
 
 use std::collections::HashMap;
 
-use crate::parsing::WithSpan;
-
 use super::{ast::*, typechecker::*};
 
 /// Push the addr of the given lvalue in %rax
@@ -220,7 +218,7 @@ fn compile_instr(
         }
         Instr::For {
             loop_var: Some(_), ..
-        } => unreachable!(),
+        } => unreachable!("Invariant of typecheck_instr function"),
         Instr::For {
             loop_var: None,
             cond,
@@ -260,12 +258,11 @@ fn compile_instr(
         }
         Instr::Break => *asm += jmp(current_loop.unwrap().1.clone()),
         Instr::Continue => *asm += jmp(current_loop.unwrap().0.clone()),
-        _ => (),
     }
 }
 
 fn compile_block(
-    block: WithSpan<Vec<DeclOrInstr<TypeAnnotation>>>,
+    block: Block<TypeAnnotation>,
     asm: &mut Text,
     variables: &mut HashMap<usize, i64>,
     current_loop: Option<(&reg::Label, &reg::Label)>,
@@ -274,25 +271,14 @@ fn compile_block(
     let mut variable_names = Vec::new();
     let mut old_variables = HashMap::new();
 
-    for decl_or_instr in &block.inner {
-        match decl_or_instr {
-            // TODO: Fun in block
-            DeclOrInstr::Fun(_) => (),
-            DeclOrInstr::Var(var) => {
-                let var_decl = &var.inner;
-                if let Some(var) = variables.remove(&var_decl.name.inner) {
-                    old_variables.insert(var_decl.name.inner, var);
-                }
-                variable_names.push(var_decl.name.inner);
-                variables.insert(
-                    var_decl.name.inner,
-                    -8 * (variables.len() + 1) as i64,
-                );
-                *asm += subq(reg!(RSP), immq(1));
-            }
-            DeclOrInstr::Instr(_) => (),
+    for new_var in block.declared_vars {
+        if let Some(offset) = variables.remove(&new_var) {
+            old_variables.insert(new_var, offset);
         }
+        variable_names.push(new_var);
+        variables.insert(new_var, -8 * (variables.len() + 1) as i64);
     }
+    *asm += subq(reg!(RSP), immq(8 * variables.len() as i64));
 
     for decl_or_instr in block.inner {
         if let DeclOrInstr::Instr(instr) = decl_or_instr {

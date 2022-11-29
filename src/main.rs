@@ -21,7 +21,7 @@ struct Cli {
 
 fn report_errors(errs: Vec<Error>) -> ! {
     for err in errs {
-	eprint!("{}", err);
+        eprint!("{}", err);
     }
     exit(1)
 }
@@ -65,8 +65,9 @@ fn main() -> ExitCode {
         }
     }
 
-    let (parsed, string_store) =
-        petitc::parse(&args.path).map_err(|err| report_errors(vec![err])).unwrap();
+    let (parsed, string_store) = petitc::parse(&args.path)
+        .map_err(|err| report_errors(vec![err]))
+        .unwrap();
 
     if args.parse_only {
         return ExitCode::from(0);

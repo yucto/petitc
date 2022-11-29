@@ -645,54 +645,54 @@ pub(crate) mod display {
         {
             let left_column_size =
                 (span.start().0 + 1).to_string().len().max(3);
-	    error_report(span, left_column_size, "-->", f)?;
-	    left_column_newline(left_column_size, f)?;
-	    single_line(span, left_column_size, "", span.start().0, f)?;
-	    let is_span_first = hint_span.start().1 > span.end().1;
-	    left_column(left_column_size, f)?;
-	    if is_span_first {
-		let offset1 = span.start().1;
-		let length1 = span.end().1 - span.start().1 + 1;
-		let offset2 = hint_span.start().1 - (offset1+length1);
-		let length2 = hint_span.end().1 - hint_span.start().1 + 1;
-		cwriteln!(
-		    f,
-		    "{}<s,r!>{}</>{}<s,r!>{} {}</>",
-		    " ".repeat(offset1),
-		    "^".repeat(length1),
-		    " ".repeat(offset2),
-		    "~".repeat(length2),
-		    hint_message,
-		)?;
-		left_column(left_column_size, f)?;
-		cwriteln!(
-		    f,
-		    "{}<s,r!>{}</>",
-		    " ".repeat(offset1+length1-1),
-		    message,
-		)?;
-	    } else {
-		let offset1 = hint_span.start().1;
-		let length1 = hint_span.end().1 - hint_span.start().1 + 1;
-		let offset2 = span.start().1 - (offset1+length1);
-		let length2 = span.end().1 - span.start().1 + 1;
-		cwriteln!(
-		    f,
-		    "{}<s,r!>{}</>{}<s,r!>{} {}</>",
-		    " ".repeat(offset1),
-		    "~".repeat(length1),
-		    " ".repeat(offset2),
-		    "^".repeat(length2),
-		    message,
-		)?;
-		left_column(left_column_size, f)?;
-		cwriteln!(
-		    f,
-		    "{}<s,r!>{}</>",
-		    " ".repeat(offset1+length1-1),
-		    hint_message,
-		)?;
-	    }
+            error_report(span, left_column_size, "-->", f)?;
+            left_column_newline(left_column_size, f)?;
+            single_line(span, left_column_size, "", span.start().0, f)?;
+            let is_span_first = hint_span.start().1 > span.end().1;
+            left_column(left_column_size, f)?;
+            if is_span_first {
+                let offset1 = span.start().1;
+                let length1 = span.end().1 - span.start().1 + 1;
+                let offset2 = hint_span.start().1 - (offset1 + length1);
+                let length2 = hint_span.end().1 - hint_span.start().1 + 1;
+                cwriteln!(
+                    f,
+                    "{}<s,r!>{}</>{}<s,r!>{} {}</>",
+                    " ".repeat(offset1),
+                    "^".repeat(length1),
+                    " ".repeat(offset2),
+                    "~".repeat(length2),
+                    hint_message,
+                )?;
+                left_column(left_column_size, f)?;
+                cwriteln!(
+                    f,
+                    "{}<s,r!>{}</>",
+                    " ".repeat(offset1 + length1 - 1),
+                    message,
+                )?;
+            } else {
+                let offset1 = hint_span.start().1;
+                let length1 = hint_span.end().1 - hint_span.start().1 + 1;
+                let offset2 = span.start().1 - (offset1 + length1);
+                let length2 = span.end().1 - span.start().1 + 1;
+                cwriteln!(
+                    f,
+                    "{}<s,r!>{}</>{}<s,r!>{} {}</>",
+                    " ".repeat(offset1),
+                    "~".repeat(length1),
+                    " ".repeat(offset2),
+                    "^".repeat(length2),
+                    message,
+                )?;
+                left_column(left_column_size, f)?;
+                cwriteln!(
+                    f,
+                    "{}<s,r!>{}</>",
+                    " ".repeat(offset1 + length1 - 1),
+                    hint_message,
+                )?;
+            }
         } else if hint_span.end() <= span.start() {
             pretty_span(hint_span, "~", hint_message, "-->", true, f)?;
             pretty_span(
