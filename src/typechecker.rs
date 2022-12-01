@@ -511,7 +511,7 @@ fn insert_new_fun<'env>(
     fun_is_toplevel: bool,
     name_of: &'_ mut Vec<String>,
 ) -> Ident {
-    let new_name = if !fun_is_toplevel {
+    let new_name = if !fun_is_toplevel && name_of[ident] != "main" {
         let new_name_str = format!(
             "{}{}",
             name_of[ident],
