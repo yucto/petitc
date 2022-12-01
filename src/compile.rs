@@ -60,27 +60,61 @@ fn compile_expr(
             *asm += popq(RBX);
             *asm += movq(addr!(RBX), reg!(RAX));
         }
-        Expr::Call { name, args } => {
-            let nb_arg = args.len();
-            // malloc
-            for arg in args.into_iter().rev() {
-                compile_expr(arg, asm, variables, name_of, deps, fun_id);
-                *asm += pushq(reg!(RAX));
+        Expr::Call { name, mut args } => {
+            fn align_stack(asm: &mut Text, label: reg::Label) {
+                *asm += movq(reg!(RBX), reg!(RSP)); // Saving the stack
+                *asm += andq(reg!(RSP), immq(-16)); // Align the stack
+                *asm += movq(reg!(RDI), reg!(RAX));
+
+                *asm += call(label);
+
+                *asm += movq(reg!(RSP), reg!(RBX)); // Restoring the stack
             }
+
+            // malloc
             if name.inner == 0 {
-                *asm += call(reg::Label::from_str("real_malloc".to_string()));
+                compile_expr(
+                    args.remove(0),
+                    asm,
+                    variables,
+                    name_of,
+                    deps,
+                    fun_id,
+                );
+
+                align_stack(
+                    asm,
+                    reg::Label::from_str("malloc".to_string()),
+                );
             }
             // putchar
             else if name.inner == 1 {
-                *asm += call(reg::Label::from_str("real_putchar".to_string()));
+		compile_expr(
+		    args.remove(0),
+		    asm,
+		    variables,
+                    name_of,
+                    deps,
+                    fun_id,
+                );
+
+                align_stack(
+                    asm,
+                    reg::Label::from_str("putchar".to_string()),
+                );
             } else {
+                let nb_arg = args.len();
+                for arg in args.into_iter().rev() {
+                    compile_expr(arg, asm, variables, name_of, deps, fun_id);
+                    *asm += pushq(reg!(RAX));
+                }
                 // Safe because of the typechecking
                 deps.lca(fun_id, deps.find_by_name(name.inner).unwrap());
                 *asm += call(reg::Label::from_str(name_of[name.inner].clone()));
                 *asm += pushq(reg!(RAX));
-            }
-            for _ in 0..nb_arg {
-                *asm += pushq(reg!(RAX));
+                for _ in 0..nb_arg {
+                    *asm += pushq(reg!(RAX));
+                }
             }
         }
         Expr::PrefixIncr(e) => {
@@ -421,7 +455,6 @@ pub fn compile(
             &file.function_dependencies,
         );
     }
-
     let mut f = StdFile::create(path.as_ref().with_extension(".s"))?;
     f.write_all(b"\t.text\n")?;
     f.write_all(b"\t.glbl main\n")?;
