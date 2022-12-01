@@ -173,10 +173,11 @@ fn compile_instr(
             let endif_label =
                 new_label(&format!("@endif{}", format_span(&instr.span)));
             if else_branch.is_some() {
+                *asm += testq(reg!(RAX), reg!(RAX));
                 *asm += jz(else_label.clone());
             }
             compile_instr(*then_branch, asm, current_loop, variables, name_of);
-            *asm += jz(endif_label.clone());
+            *asm += jmp(endif_label.clone());
             if let Some(else_branch) = *else_branch {
                 *asm += Text::label(else_label);
                 compile_instr(
@@ -196,6 +197,7 @@ fn compile_instr(
                 new_label(&format!("@loop_exit{}", format_span(&instr.span)));
             *asm += Text::label(loop_start.clone());
             compile_expr(cond, asm, variables);
+            *asm += testq(reg!(RAX), reg!(RAX));
             *asm += jz(loop_exit.clone());
             compile_instr(
                 *body,
@@ -223,8 +225,9 @@ fn compile_instr(
             *asm += Text::label(for_start.clone());
             if let Some(cond) = cond {
                 compile_expr(cond, asm, variables);
+                *asm += testq(reg!(RAX), reg!(RAX));
+                *asm += jz(for_exit.clone());
             }
-            *asm += jz(for_exit.clone());
             compile_instr(
                 *body,
                 asm,
