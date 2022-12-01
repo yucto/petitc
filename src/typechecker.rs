@@ -8,6 +8,7 @@ use crate::{
     ast::*,
     error::{Error, ErrorKind, Result},
     parsing::{SpanAnnotation, WithSpan},
+    tree::{Id, Tree},
     typing::{BasisTypable, BasisType, Type},
 };
 
@@ -101,7 +102,7 @@ impl Annotation for PartialTypeAnnotation {
     type WrapExpr<T> = WithType<Option<T>, PartialType>;
     type WrapInstr<T> = TypedInstr<T, PartialType>;
     type WrapBlock<T> = WrapTypedBlock<T>;
-    type WrapFunDecl<T> = WithSpan<T>;
+    type WrapFunDecl<T> = TypedFunDecl<T>;
     type WrapVarDecl<T> = WithSpan<T>;
     type WrapElseBranch<T> = Option<TypedInstr<T, PartialType>>;
 }
@@ -112,7 +113,7 @@ impl File<PartialTypeAnnotation> {
             fun_decls: self
                 .fun_decls
                 .into_iter()
-                .map(|ws| ws.map_opt(|inner| inner.to_full()))
+                .map(|ws| ws.to_full())
                 .collect::<Option<_>>()?,
         })
     }
@@ -137,9 +138,7 @@ impl FunDecl<PartialTypeAnnotation> {
 impl DeclOrInstr<PartialTypeAnnotation> {
     fn to_full(self) -> Option<DeclOrInstr<TypeAnnotation>> {
         Some(match self {
-            Self::Fun(fun) => {
-                DeclOrInstr::Fun(fun.map_opt(|fun_decl| fun_decl.to_full())?)
-            }
+            Self::Fun(fun) => DeclOrInstr::Fun(fun.to_full()?),
             Self::Var(var) => {
                 DeclOrInstr::Var(var.map_opt(|var_decl| var_decl.to_full())?)
             }
@@ -291,7 +290,7 @@ impl Annotation for TypeAnnotation {
     type WrapExpr<T> = WithType<T, Type>;
     type WrapInstr<T> = TypedInstr<T, Type>;
     type WrapBlock<T> = WrapTypedBlock<T>;
-    type WrapFunDecl<T> = WithSpan<T>;
+    type WrapFunDecl<T> = TypedFunDecl<T>;
     type WrapVarDecl<T> = WithSpan<T>;
     type WrapElseBranch<T> = Option<TypedInstr<T, Type>>;
 }
@@ -435,6 +434,28 @@ impl DepthIdent {
     }
 }
 
+pub struct TypedFunDecl<T> {
+    pub inner: T,
+    pub span: Span,
+    pub id: Id,
+}
+
+impl TypedFunDecl<FunDecl<PartialTypeAnnotation>> {
+    fn to_full(self) -> Option<TypedFunDecl<FunDecl<TypeAnnotation>>> {
+        Some(TypedFunDecl {
+            inner: self.inner.to_full()?,
+            span: self.span,
+            id: self.id,
+        })
+    }
+}
+
+pub struct TypedFile {
+    pub inner: File<TypeAnnotation>,
+    /// Store a tree representing which function is declared in which function
+    pub function_dependencies: Tree,
+}
+
 enum Binding {
     /// (type, depth)
     Var(PartialType, usize),
@@ -487,17 +508,23 @@ fn insert_new_fun<'env>(
     ident: Ident,
     fun_binding: (PartialType, Vec<PartialType>),
     span: Option<Span>,
+    fun_is_toplevel: bool,
     name_of: &'_ mut Vec<String>,
 ) -> Ident {
-    let new_name_str = format!(
-        "{}{}",
-        name_of[ident],
-        span.as_ref()
-            .map(format_span)
-            .unwrap_or_else(|| "".to_string())
-    );
-    let new_name = name_of.len();
-    name_of.push(new_name_str);
+    let new_name = if !fun_is_toplevel {
+        let new_name_str = format!(
+            "{}{}",
+            name_of[ident],
+            span.as_ref()
+                .map(format_span)
+                .unwrap_or_else(|| "".to_string())
+        );
+        let new_name = name_of.len();
+        name_of.push(new_name_str);
+        new_name
+    } else {
+        ident
+    };
     env.insert(
         ident,
         (Binding::Fun(fun_binding.0, fun_binding.1), span, new_name),
@@ -1034,6 +1061,8 @@ fn typecheck_instr(
     expected_return_type: PartialType,
     env: &mut Environment,
     name_of: &mut Vec<String>,
+    deps: &mut Tree,
+    parent: Id,
 ) -> TypedInstr<Instr<PartialTypeAnnotation>, PartialType> {
     match instr.inner {
         Instr::EmptyInstr => TypedInstr {
@@ -1061,6 +1090,8 @@ fn typecheck_instr(
                 expected_return_type.clone(),
                 env,
                 name_of,
+                deps,
+                parent,
             );
             let else_branch = if let Some(else_branch) = *else_branch {
                 Some(typecheck_instr(
@@ -1070,6 +1101,8 @@ fn typecheck_instr(
                     expected_return_type.clone(),
                     env,
                     name_of,
+                    deps,
+                    parent,
                 ))
             } else {
                 None
@@ -1124,6 +1157,8 @@ fn typecheck_instr(
                 expected_return_type.clone(),
                 env,
                 name_of,
+                deps,
+                parent,
             );
             if cond.ty.is_void() {
                 report_error(Error::new(ErrorKind::VoidExpression {
@@ -1168,6 +1203,8 @@ fn typecheck_instr(
                 expected_return_type.clone(),
                 env,
                 name_of,
+                deps,
+                parent,
             ));
 
             if let Some(ref cond) = cond {
@@ -1226,6 +1263,8 @@ fn typecheck_instr(
             expected_return_type,
             env,
             name_of,
+            deps,
+            parent,
         ),
         Instr::Block(block) => typecheck_block(
             block,
@@ -1234,6 +1273,8 @@ fn typecheck_instr(
             expected_return_type,
             env,
             name_of,
+            deps,
+            parent,
         ),
         Instr::Return(None) => {
             if !expected_return_type.is_void() {
@@ -1318,6 +1359,8 @@ fn typecheck_block(
     expected_return_type: PartialType,
     env: &mut Environment,
     name_of: &mut Vec<String>,
+    deps: &mut Tree,
+    parent: Id,
 ) -> TypedInstr<Instr<PartialTypeAnnotation>, PartialType> {
     let mut new_bindings = Vec::new();
     let mut ret = Vec::new();
@@ -1341,7 +1384,8 @@ fn typecheck_block(
                     env.remove(&fun_decl.inner.name.inner).map(|x| (x.0, x.2)),
                 ));
                 // typecheck_fun insert the declaration in env
-                let fun_decl = typecheck_fun(fun_decl, env, name_of);
+                let fun_decl =
+                    typecheck_fun(fun_decl, env, name_of, deps, parent);
                 ret.push(DeclOrInstr::Fun(fun_decl));
             }
             DeclOrInstr::Var(var_decl) => {
@@ -1428,6 +1472,8 @@ fn typecheck_block(
                     expected_return_type,
                     env,
                     name_of,
+                    deps,
+                    parent,
                 )))
             }
         }
@@ -1463,7 +1509,9 @@ fn typecheck_fun(
     decl: WithSpan<FunDecl<SpanAnnotation>>,
     env: &mut Environment,
     name_of: &mut Vec<String>,
-) -> WithSpan<FunDecl<PartialTypeAnnotation>> {
+    deps: &mut Tree,
+    parent: Id,
+) -> TypedFunDecl<FunDecl<PartialTypeAnnotation>> {
     let code = decl
         .inner
         .params
@@ -1493,8 +1541,11 @@ fn typecheck_fun(
                 .collect(),
         ),
         Some(decl.span.clone()),
+        parent == deps.root(),
         name_of,
     );
+
+    let id = deps.add_child(parent, new_name);
 
     let typed_instr = typecheck_block(
         WithSpan::new(code, decl.inner.code.span),
@@ -1503,6 +1554,8 @@ fn typecheck_fun(
         decl.inner.ty.inner.from_basic(),
         env,
         name_of,
+        deps,
+        id,
     );
 
     let Instr::Block(mut code) =
@@ -1516,8 +1569,8 @@ fn typecheck_fun(
         .skip(decl.inner.params.len())
         .collect();
 
-    WithSpan::new(
-        FunDecl {
+    TypedFunDecl {
+        inner: FunDecl {
             ty: decl.inner.ty.into(),
             name: DepthIdent {
                 inner: new_name,
@@ -1538,14 +1591,15 @@ fn typecheck_fun(
             code,
             depth: decl.inner.depth,
         },
-        decl.span,
-    )
+        span: decl.span,
+        id,
+    }
 }
 
 pub fn typecheck(
     file: File<SpanAnnotation>,
     name_of: &mut Vec<String>,
-) -> std::result::Result<File<TypeAnnotation>, Vec<Error>> {
+) -> std::result::Result<TypedFile, Vec<Error>> {
     if let Some(WithSpan {
         inner: main_decl,
         span: main_span,
@@ -1589,6 +1643,8 @@ pub fn typecheck(
         ),
     );
     let mut fun_decls = Vec::new();
+    let mut deps = Tree::new();
+    let root = deps.root();
 
     for decl in file.fun_decls {
         if let Ok((_, first_definition, _)) = get_fun(
@@ -1602,12 +1658,15 @@ pub fn typecheck(
                 name: name_of[decl.inner.name.inner].clone(),
             }));
         }
-        fun_decls.push(typecheck_fun(decl, &mut env, name_of));
+        fun_decls.push(typecheck_fun(decl, &mut env, name_of, &mut deps, root));
     }
 
     let errors = get_errors();
     if errors.is_empty() {
-        Ok(File { fun_decls }.to_full().unwrap())
+        Ok(TypedFile {
+            inner: File { fun_decls }.to_full().unwrap(),
+            function_dependencies: deps,
+        })
     } else {
         Err(errors)
     }
