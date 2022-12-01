@@ -68,11 +68,11 @@ fn compile_expr(
                 *asm += pushq(reg!(RAX));
             }
             if name.inner == 0 {
-                *asm += call(reg::Label::from_str("@real_malloc".to_string()));
+                *asm += call(reg::Label::from_str("real_malloc".to_string()));
             }
             // putchar
             else if name.inner == 1 {
-                *asm += call(reg::Label::from_str("@real_putchar".to_string()));
+                *asm += call(reg::Label::from_str("real_putchar".to_string()));
             } else {
                 // Safe because of the typechecking
                 deps.lca(fun_id, deps.find_by_name(name.inner).unwrap());
@@ -210,9 +210,9 @@ fn compile_instr(
         } => {
             compile_expr(cond, asm, variables, name_of, deps, fun_id);
             let else_label =
-                new_label(&format!("@else{}", format_span(&instr.span)));
+                new_label(&format!("else{}", format_span(&instr.span)));
             let endif_label =
-                new_label(&format!("@endif{}", format_span(&instr.span)));
+                new_label(&format!("endif{}", format_span(&instr.span)));
             if else_branch.is_some() {
                 *asm += testq(reg!(RAX), reg!(RAX));
                 *asm += jz(else_label.clone());
@@ -243,9 +243,9 @@ fn compile_instr(
         }
         Instr::While { cond, body } => {
             let loop_start =
-                new_label(&format!("@loop{}", format_span(&instr.span)));
+                new_label(&format!("loop{}", format_span(&instr.span)));
             let loop_exit =
-                new_label(&format!("@loop_exit{}", format_span(&instr.span)));
+                new_label(&format!("loop_exit{}", format_span(&instr.span)));
             *asm += Text::label(loop_start.clone());
             compile_expr(cond, asm, variables, name_of, deps, fun_id);
             *asm += testq(reg!(RAX), reg!(RAX));
@@ -272,9 +272,9 @@ fn compile_instr(
             body,
         } => {
             let for_start =
-                new_label(&format!("@for{}", format_span(&instr.span)));
+                new_label(&format!("for{}", format_span(&instr.span)));
             let for_exit =
-                new_label(&format!("@for_exit{}", format_span(&instr.span)));
+                new_label(&format!("for_exit{}", format_span(&instr.span)));
             *asm += Text::label(for_start.clone());
             if let Some(cond) = cond {
                 compile_expr(cond, asm, variables, name_of, deps, fun_id);

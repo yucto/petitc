@@ -26,11 +26,7 @@ fn get_errors() -> Vec<Error> {
 
 pub fn format_span(span: &beans::span::Span) -> String {
     let start_loc = span.start();
-    let end_loc = span.end();
-    format!(
-        "{}.{}-{}.{}",
-        start_loc.0, start_loc.1, end_loc.0, end_loc.1
-    )
+    format!("{}_{}", start_loc.0, start_loc.1)
 }
 
 pub(crate) type PartialType = Type<PartialBasisType>;
@@ -513,7 +509,7 @@ fn insert_new_fun<'env>(
 ) -> Ident {
     let new_name = if !fun_is_toplevel && name_of[ident] != "main" {
         let new_name_str = format!(
-            "{}{}",
+            "f_{}{}",
             name_of[ident],
             span.as_ref()
                 .map(format_span)
