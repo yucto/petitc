@@ -308,6 +308,8 @@ fn compile_instr(
         Instr::Return(opt_e) => {
             if let Some(e) = opt_e {
                 compile_expr(e, asm, variables, name_of, deps, fun_id);
+            } else {
+                *asm += movq(reg!(RAX), immq(0));
             }
             *asm += leave();
             *asm += ret()
@@ -392,6 +394,8 @@ fn compile_fun(
         deps,
         fun_id,
     );
+    *asm += movq(reg!(RAX), immq(0));
+    *asm += ret();
 
     for (id, old) in old_variables {
         variables.remove(&id);
