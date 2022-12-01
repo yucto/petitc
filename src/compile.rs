@@ -449,9 +449,9 @@ pub fn compile(
             &file.function_dependencies,
         );
     }
-    let mut f = StdFile::create(path.as_ref().with_extension(".s"))?;
+    let mut f = StdFile::create(path.as_ref().with_extension("s"))?;
     f.write_all(b"\t.text\n")?;
-    f.write_all(b"\t.glbl main\n")?;
+    f.write_all(b"\t.globl main\n")?;
 
     asm.write_in(&mut f)?;
 

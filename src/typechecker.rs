@@ -993,7 +993,6 @@ fn type_expr(
             } else {
                 PartialType::INT
             };
-            println!("{} - {} : {}", ty1, ty2, ret_type);
             WithType::new(Some(new_e), ret_type, e.span)
         }
         Expr::Call { name, args } => {
@@ -1360,6 +1359,7 @@ fn typecheck_block(
 ) -> TypedInstr<Instr<PartialTypeAnnotation>, PartialType> {
     let mut new_bindings = Vec::new();
     let mut ret = Vec::new();
+    let mut declared_vars = Vec::new();
 
     for decl_or_instr in block.inner {
         match decl_or_instr {
@@ -1421,6 +1421,8 @@ fn typecheck_block(
                     name_of,
                 );
 
+                declared_vars.push(new_name);
+
                 let value = var_decl
                     .inner
                     .value
@@ -1475,15 +1477,12 @@ fn typecheck_block(
         }
     }
 
-    let mut declared_vars = Vec::new();
-
     for (name, old_binding) in new_bindings {
         if let Some((binding, new_name)) = old_binding {
             env.insert(name.inner, (binding, Some(name.span), new_name));
         } else {
             env.remove(&name.inner);
         }
-        declared_vars.push(name.inner);
     }
 
     TypedInstr {
