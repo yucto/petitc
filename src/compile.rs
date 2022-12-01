@@ -82,26 +82,20 @@ fn compile_expr(
                     fun_id,
                 );
 
-                align_stack(
-                    asm,
-                    reg::Label::from_str("malloc".to_string()),
-                );
+                align_stack(asm, reg::Label::from_str("malloc".to_string()));
             }
             // putchar
             else if name.inner == 1 {
-		compile_expr(
-		    args.remove(0),
-		    asm,
-		    variables,
+                compile_expr(
+                    args.remove(0),
+                    asm,
+                    variables,
                     name_of,
                     deps,
                     fun_id,
                 );
 
-                align_stack(
-                    asm,
-                    reg::Label::from_str("putchar".to_string()),
-                );
+                align_stack(asm, reg::Label::from_str("putchar".to_string()));
             } else {
                 let nb_arg = args.len();
                 for arg in args.into_iter().rev() {
