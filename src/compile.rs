@@ -121,28 +121,10 @@ fn compile_expr(
                 }
             }
         }
-        Expr::PrefixIncr(e) => {
-            push_addr(*e, asm, variables, name_of, deps, fun_id);
-            *asm += incq(addr!(RAX));
-            *asm += movq(reg!(RAX), addr!(RAX));
-        }
-        Expr::PrefixDecr(e) => {
-            push_addr(*e, asm, variables, name_of, deps, fun_id);
-            *asm += decq(addr!(RAX));
-            *asm += movq(reg!(RAX), addr!(RAX));
-        }
-        Expr::PostfixIncr(e) => {
-            push_addr(*e, asm, variables, name_of, deps, fun_id);
-            *asm += movq(reg!(RBX), reg!(RAX));
-            *asm += movq(reg!(RAX), addr!(RAX));
-            *asm += incq(addr!(RBX));
-        }
-        Expr::PostfixDecr(e) => {
-            push_addr(*e, asm, variables, name_of, deps, fun_id);
-            *asm += movq(reg!(RBX), reg!(RAX));
-            *asm += movq(reg!(RAX), addr!(RAX));
-            *asm += decq(addr!(RBX));
-        }
+        Expr::PrefixIncr(_)
+        | Expr::PrefixDecr(_)
+        | Expr::PostfixIncr(_)
+        | Expr::PostfixDecr(_) => unreachable!("postcondition of typechecker"),
         Expr::Addr(e) => push_addr(*e, asm, variables, name_of, deps, fun_id),
         Expr::Not(e) => {
             compile_expr(*e, asm, variables, name_of, deps, fun_id);
@@ -306,7 +288,7 @@ fn compile_instr(
         }
         Instr::For {
             loop_var: Some(_), ..
-        } => unreachable!("Invariant of typecheck_instr function"),
+        } => unreachable!("invariant of typechecker"),
         Instr::For {
             loop_var: None,
             cond,
