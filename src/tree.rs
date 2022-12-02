@@ -53,11 +53,11 @@ impl Tree {
     pub fn lca(&self, caller_func: Id, called_func: Id) -> usize {
         let mut node = caller_func;
         while called_func != node
-            || (self
+            && (self
                 .children(node)
                 .iter()
                 .find(|c| **c == called_func)
-                .is_some())
+                .is_none())
         {
             // safe because of the precondition
             node = self.parent(node).unwrap();

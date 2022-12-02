@@ -102,8 +102,7 @@ fn compile_expr(
                     compile_expr(arg, asm, variables, name_of, deps, fun_id);
                     *asm += pushq(reg!(RAX));
                 }
-                // Safe because of the typechecking
-                // TODO: there is currently a bug here
+                // safe because of the typechecking
                 let height =
                     deps.lca(fun_id, deps.find_by_name(name.inner).unwrap());
                 *asm += movq(reg!(RBP), reg!(RAX));
