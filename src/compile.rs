@@ -216,7 +216,7 @@ fn compile_instr(
     name_of: &[String],
     deps: &Tree,
     fun_id: Id,
-    fun_stack: &mut Vec<TypedFunDecl<FunDecl<TypeAnnotation>>>,
+    fun_asm: &mut Vec<Text>,
 ) {
     match instr.instr {
         Instr::EmptyInstr => (),
@@ -245,7 +245,7 @@ fn compile_instr(
                 name_of,
                 deps,
                 fun_id,
-                fun_stack,
+                fun_asm,
             );
             *asm += jmp(endif_label.clone());
             if let Some(else_branch) = *else_branch {
@@ -258,7 +258,7 @@ fn compile_instr(
                     name_of,
                     deps,
                     fun_id,
-                    fun_stack,
+                    fun_asm,
                 );
             }
             *asm += Text::label(endif_label);
@@ -280,7 +280,7 @@ fn compile_instr(
                 name_of,
                 deps,
                 fun_id,
-                fun_stack,
+                fun_asm,
             );
             *asm += jmp(loop_start);
             *asm += Text::label(loop_exit);
@@ -312,7 +312,7 @@ fn compile_instr(
                 name_of,
                 deps,
                 fun_id,
-                fun_stack,
+                fun_asm,
             );
             for incr_expr in incr {
                 compile_expr(incr_expr, asm, variables, name_of, deps, fun_id);
@@ -328,7 +328,7 @@ fn compile_instr(
             name_of,
             deps,
             fun_id,
-            fun_stack,
+            fun_asm,
         ),
         Instr::Return(opt_e) => {
             if let Some(e) = opt_e {
@@ -352,7 +352,7 @@ fn compile_block(
     name_of: &[String],
     deps: &Tree,
     fun_id: Id,
-    fun_stack: &mut Vec<TypedFunDecl<FunDecl<TypeAnnotation>>>,
+    fun_asm: &mut Vec<Text>,
 ) {
     let mut variable_names = Vec::new();
     let mut old_variables = HashMap::new();
@@ -377,10 +377,10 @@ fn compile_block(
                 name_of,
                 deps,
                 fun_id,
-                fun_stack,
+                fun_asm,
             );
         } else if let DeclOrInstr::Fun(fun_decl) = decl_or_instr {
-            fun_stack.push(fun_decl);
+            compile_fun(fun_decl, variables, name_of, deps, fun_asm);
         }
     }
 
@@ -391,24 +391,25 @@ fn compile_block(
         }
     }
 
-    *asm += addq(reg!(RSP), immq(variables.len() as i64));
+    // restore the stack
+    *asm += addq(reg!(RSP), immq(8 * variables.len() as i64));
 }
 
 fn compile_fun(
     fun_decl: TypedFunDecl<FunDecl<TypeAnnotation>>,
-    asm: &mut Text,
     variables: &mut HashMap<usize, i64>,
     name_of: &[String],
     deps: &Tree,
-    fun_stack: &mut Vec<TypedFunDecl<FunDecl<TypeAnnotation>>>,
+    fun_asm: &mut Vec<Text>,
 ) {
+    let mut asm = Text::empty();
     let fun_id = fun_decl.id;
 
-    *asm += Text::label(reg::Label::from_str(
+    asm += Text::label(reg::Label::from_str(
         name_of[fun_decl.inner.name.inner].clone(),
     ));
-    *asm += pushq(reg!(RBP));
-    *asm += movq(reg!(RBP), reg!(RSP));
+    asm += pushq(reg!(RBP));
+    asm += movq(reg!(RBP), reg!(RSP));
 
     let mut old_variables = Vec::new();
     for (nb, (_, arg)) in fun_decl.inner.params.iter().enumerate() {
@@ -418,16 +419,16 @@ fn compile_fun(
 
     compile_block(
         fun_decl.inner.code,
-        asm,
+        &mut asm,
         variables,
         None,
         name_of,
         deps,
         fun_id,
-        fun_stack,
+        fun_asm,
     );
-    *asm += movq(reg!(RAX), immq(0));
-    *asm += ret();
+    asm += movq(reg!(RAX), immq(0));
+    asm += ret();
 
     for (id, old) in old_variables {
         variables.remove(&id);
@@ -435,6 +436,8 @@ fn compile_fun(
             variables.insert(id, old);
         }
     }
+
+    fun_asm.push(asm);
 }
 
 pub fn compile(
@@ -442,24 +445,24 @@ pub fn compile(
     file: TypedFile,
     name_of: &[String],
 ) -> Result<()> {
-    let mut asm = Text::empty();
     let mut variables = HashMap::new();
-    let mut fun_stack = file.inner.fun_decls;
-    while let Some(fun_decl) = fun_stack.pop() {
+    let mut fun_asm = Vec::new();
+    for fun_decl in file.inner.fun_decls.into_iter() {
         compile_fun(
             fun_decl,
-            &mut asm,
             &mut variables,
             name_of,
             &file.function_dependencies,
-            &mut fun_stack,
+            &mut fun_asm,
         );
     }
     let mut f = StdFile::create(path.as_ref().with_extension("s"))?;
     f.write_all(b"\t.text\n")?;
     f.write_all(b"\t.globl main\n")?;
 
-    asm.write_in(&mut f)?;
+    for asm in fun_asm.into_iter() {
+        asm.write_in(&mut f)?;
+    }
 
     Ok(())
 }
