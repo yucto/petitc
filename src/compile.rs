@@ -386,6 +386,7 @@ fn compile_block(
     *asm += subq(reg!(RSP), immq(8 * variables.len() as i64));
 
     for decl_or_instr in block.inner {
+        // We don't have to handle var_decl with value since the typechecker remove them
         if let DeclOrInstr::Instr(instr) = decl_or_instr {
             compile_instr(
                 instr,
@@ -397,6 +398,8 @@ fn compile_block(
                 fun_id,
                 fun_stack,
             );
+        } else if let DeclOrInstr::Fun(fun_decl) = decl_or_instr {
+            fun_stack.push(fun_decl);
         }
     }
 

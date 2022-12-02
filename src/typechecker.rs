@@ -1347,6 +1347,7 @@ fn assert_var_is_not_reused(
 }
 
 /// Always returns a block
+/// Transform all `ty var = value` into `ty var; var = value;`
 fn typecheck_block(
     block: Block<SpanAnnotation>,
     loop_level: usize,
@@ -1358,7 +1359,7 @@ fn typecheck_block(
     parent: Id,
 ) -> TypedInstr<Instr<PartialTypeAnnotation>, PartialType> {
     let mut new_bindings = Vec::new();
-    let mut ret = Vec::new();
+    let mut typed_block = Vec::new();
     let mut declared_vars = Vec::new();
 
     for decl_or_instr in block.inner {
@@ -1382,7 +1383,7 @@ fn typecheck_block(
                 // typecheck_fun insert the declaration in env
                 let fun_decl =
                     typecheck_fun(fun_decl, env, name_of, deps, parent);
-                ret.push(DeclOrInstr::Fun(fun_decl));
+                typed_block.push(DeclOrInstr::Fun(fun_decl));
             }
             DeclOrInstr::Var(var_decl) => {
                 if var_decl.inner.ty.inner.is_eq(&Type::VOID) {
@@ -1423,47 +1424,48 @@ fn typecheck_block(
 
                 declared_vars.push(new_name);
 
-                let value = var_decl
-                    .inner
-                    .value
-                    .map(|value| type_expr(value, depth, env, name_of));
-
-                if let Some(ref val) = value {
-                    let var_decl_type = var_decl.inner.ty.inner.from_basic();
-                    if !val.ty.is_eq(&var_decl_type) {
-                        report_error(Error::new(
-                            ErrorKind::VariableTypeMismatch {
-                                expected_type: var_decl_type,
-                                found_type: val.ty.clone(),
-                                span: val.span.clone(),
-                                definition_span: var_decl
-                                    .inner
-                                    .ty
-                                    .span
-                                    .sup(&var_decl.inner.name.span),
-                                variable_name: name_of
-                                    [var_decl.inner.name.inner]
-                                    .clone(),
-                            },
-                        ));
-                    }
-                }
-
-                ret.push(DeclOrInstr::Var(WithSpan::new(
+                typed_block.push(DeclOrInstr::Var(WithSpan::new(
                     VarDecl {
                         ty: var_decl.inner.ty.into(),
                         name: DepthIdent {
                             inner: new_name,
-                            span: var_decl.inner.name.span,
+                            span: var_decl.inner.name.span.clone(),
                             depth,
                         },
-                        value,
+                        value: None,
                     },
-                    var_decl.span,
+                    var_decl.span.clone(),
                 )));
+
+                if let Some(value) = var_decl.inner.value {
+                    let assign = WithSpan::new(
+                        Instr::ExprInstr(WithSpan::new(
+                            Expr::Assign {
+                                lhs: Box::new(WithSpan::new(
+                                    Expr::Ident(var_decl.inner.name.clone()),
+                                    var_decl.inner.name.span,
+                                )),
+                                rhs: Box::new(value),
+                            },
+                            var_decl.span.clone(),
+                        )),
+                        var_decl.span.clone(),
+                    );
+                    let typed_assign = typecheck_instr(
+                        assign,
+                        loop_level,
+                        depth,
+                        expected_return_type,
+                        env,
+                        name_of,
+                        deps,
+                        parent,
+                    );
+                    typed_block.push(DeclOrInstr::Instr(typed_assign));
+                }
             }
             DeclOrInstr::Instr(instr) => {
-                ret.push(DeclOrInstr::Instr(typecheck_instr(
+                typed_block.push(DeclOrInstr::Instr(typecheck_instr(
                     instr,
                     loop_level,
                     depth,
@@ -1487,7 +1489,7 @@ fn typecheck_block(
 
     TypedInstr {
         instr: Instr::Block(WrapTypedBlock {
-            inner: ret,
+            inner: typed_block,
             span: block.span.clone(),
             declared_vars,
         }),
