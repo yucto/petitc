@@ -4,9 +4,10 @@ use super::ast::Ident;
 
 pub type Id = usize;
 
-/// id => parent, depth, children
 pub struct Tree {
+    /// id => parent, depth, children
     graph: Vec<(Id, usize, Vec<Id>)>,
+    /// ident => id in the tree
     assoc: HashMap<Ident, Id>,
 }
 
@@ -36,7 +37,7 @@ impl Tree {
 
     pub fn parent(&self, child: Id) -> Option<Id> {
         let parent = self.graph[child].0;
-        (parent != 0).then_some(parent)
+        (child != 0).then_some(parent)
     }
 
     pub fn children(&self, parent: Id) -> &[Id] {
@@ -49,19 +50,18 @@ impl Tree {
 
     /// Return the relative height difference of callee_func and its lca with caller_func
     /// called_func should be a direct ancestor or son-of-an-ancestor of caller_func
-    pub fn lca(&self, caller_func: Id, called_func: Id) -> (Id, usize) {
+    pub fn lca(&self, caller_func: Id, called_func: Id) -> usize {
         let mut node = caller_func;
-        let p = self.parent(called_func);
-        while !called_func != node
+        while called_func != node
             || (self
-                .children(p.unwrap())
+                .children(node)
                 .iter()
-                .find(|c| **c == node)
+                .find(|c| **c == called_func)
                 .is_some())
         {
             // safe because of the precondition
             node = self.parent(node).unwrap();
         }
-        (node, self.depth(node))
+        self.depth(node) - self.depth(caller_func)
     }
 }

@@ -1640,6 +1640,8 @@ pub fn typecheck(
     let mut fun_decls = Vec::new();
     let mut deps = Tree::new();
     let root = deps.root();
+    deps.add_child(root, 0);
+    deps.add_child(root, 1);
 
     for decl in file.fun_decls {
         if let Ok((_, first_definition, _)) = get_fun(

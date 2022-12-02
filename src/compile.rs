@@ -97,17 +97,27 @@ fn compile_expr(
 
                 align_stack(asm, reg::Label::from_str("putchar".to_string()));
             } else {
-                let nb_arg = args.len();
+                let arity = args.len();
                 for arg in args.into_iter().rev() {
                     compile_expr(arg, asm, variables, name_of, deps, fun_id);
                     *asm += pushq(reg!(RAX));
                 }
                 // Safe because of the typechecking
-                deps.lca(fun_id, deps.find_by_name(name.inner).unwrap());
-                *asm += call(reg::Label::from_str(name_of[name.inner].clone()));
+                // TODO: there is currently a bug here
+                let height =
+                    deps.lca(fun_id, deps.find_by_name(name.inner).unwrap());
+                *asm += movq(reg!(RBP), reg!(RAX));
+                for _ in 0..height {
+                    *asm += movq(addr!(16, RAX), reg!(RAX));
+                }
                 *asm += pushq(reg!(RAX));
-                for _ in 0..nb_arg {
-                    *asm += pushq(reg!(RAX));
+                // return is in %rax
+                *asm += call(reg::Label::from_str(name_of[name.inner].clone()));
+                // pop the parent %rbp
+                *asm += popq(RBX);
+                // pop args
+                for _ in 0..arity {
+                    *asm += pushq(reg!(RBX));
                 }
             }
         }
@@ -225,6 +235,7 @@ fn compile_instr(
     name_of: &[String],
     deps: &Tree,
     fun_id: Id,
+    fun_stack: &mut Vec<TypedFunDecl<FunDecl<TypeAnnotation>>>,
 ) {
     match instr.instr {
         Instr::EmptyInstr => (),
@@ -253,6 +264,7 @@ fn compile_instr(
                 name_of,
                 deps,
                 fun_id,
+                fun_stack,
             );
             *asm += jmp(endif_label.clone());
             if let Some(else_branch) = *else_branch {
@@ -265,6 +277,7 @@ fn compile_instr(
                     name_of,
                     deps,
                     fun_id,
+                    fun_stack,
                 );
             }
             *asm += Text::label(endif_label);
@@ -286,6 +299,7 @@ fn compile_instr(
                 name_of,
                 deps,
                 fun_id,
+                fun_stack,
             );
             *asm += jmp(loop_start);
             *asm += Text::label(loop_exit);
@@ -317,6 +331,7 @@ fn compile_instr(
                 name_of,
                 deps,
                 fun_id,
+                fun_stack,
             );
             for incr_expr in incr {
                 compile_expr(incr_expr, asm, variables, name_of, deps, fun_id);
@@ -332,6 +347,7 @@ fn compile_instr(
             name_of,
             deps,
             fun_id,
+            fun_stack,
         ),
         Instr::Return(opt_e) => {
             if let Some(e) = opt_e {
@@ -355,6 +371,7 @@ fn compile_block(
     name_of: &[String],
     deps: &Tree,
     fun_id: Id,
+    fun_stack: &mut Vec<TypedFunDecl<FunDecl<TypeAnnotation>>>,
 ) {
     let mut variable_names = Vec::new();
     let mut old_variables = HashMap::new();
@@ -378,6 +395,7 @@ fn compile_block(
                 name_of,
                 deps,
                 fun_id,
+                fun_stack,
             );
         }
     }
@@ -398,6 +416,7 @@ fn compile_fun(
     variables: &mut HashMap<usize, i64>,
     name_of: &[String],
     deps: &Tree,
+    fun_stack: &mut Vec<TypedFunDecl<FunDecl<TypeAnnotation>>>,
 ) {
     let fun_id = fun_decl.id;
 
@@ -421,6 +440,7 @@ fn compile_fun(
         name_of,
         deps,
         fun_id,
+        fun_stack,
     );
     *asm += movq(reg!(RAX), immq(0));
     *asm += ret();
@@ -440,13 +460,15 @@ pub fn compile(
 ) -> Result<()> {
     let mut asm = Text::empty();
     let mut variables = HashMap::new();
-    for fun_decl in file.inner.fun_decls {
+    let mut fun_stack = file.inner.fun_decls;
+    while let Some(fun_decl) = fun_stack.pop() {
         compile_fun(
             fun_decl,
             &mut asm,
             &mut variables,
             name_of,
             &file.function_dependencies,
+            &mut fun_stack,
         );
     }
     let mut f = StdFile::create(path.as_ref().with_extension("s"))?;
