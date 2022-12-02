@@ -20,16 +20,16 @@ fn push_addr(
 ) {
     match e.inner {
         Expr::Ident(name) => {
-            *asm += movq(reg!(RAX), reg!(RBP));
+            *asm += movq(reg!(RBP), reg!(RAX));
             for _ in name.depth..deps.depth(fun_id) {
-                *asm += movq(reg!(RAX), addr!(16, RAX));
+                *asm += movq(addr!(16, RAX), reg!(RAX));
             }
-            *asm += addq(reg!(RAX), immq(variables[&name.inner]));
+            *asm += addq(immq(variables[&name.inner]), reg!(RAX));
         }
         Expr::Deref(e) => {
             compile_expr(*e, asm, variables, name_of, deps, fun_id)
         }
-        _ => (),
+        _ => unreachable!(),
     }
 }
 
@@ -43,32 +43,32 @@ fn compile_expr(
     fun_id: Id,
 ) {
     match e.inner {
-        Expr::Int(x) => *asm += movq(reg!(RAX), immq(x)),
-        Expr::True => *asm += movq(reg!(RAX), immq(1)),
-        Expr::False | Expr::Null => *asm += movq(reg!(RAX), immq(0)),
+        Expr::Int(x) => *asm += movq(immq(x), reg!(RAX)),
+        Expr::True => *asm += movq(immq(1), reg!(RAX)),
+        Expr::False | Expr::Null => *asm += movq(immq(0), reg!(RAX)),
         Expr::Ident(name) => {
-            *asm += movq(reg!(RAX), addr!(variables[&name.inner], RBP))
+            *asm += movq(addr!(variables[&name.inner], RBP), reg!(RAX))
         }
         Expr::Deref(e) => {
             compile_expr(*e, asm, variables, name_of, deps, fun_id);
-            *asm += movq(reg!(RAX), addr!(RAX));
+            *asm += movq(addr!(RAX), reg!(RAX));
         }
         Expr::Assign { lhs, rhs } => {
             push_addr(*lhs, asm, variables, name_of, deps, fun_id);
             *asm += pushq(reg!(RAX));
             compile_expr(*rhs, asm, variables, name_of, deps, fun_id);
             *asm += popq(RBX);
-            *asm += movq(addr!(RBX), reg!(RAX));
+            *asm += movq(reg!(RAX), addr!(RBX));
         }
         Expr::Call { name, mut args } => {
-            fn align_stack(asm: &mut Text, label: reg::Label) {
-                *asm += movq(reg!(RBX), reg!(RSP)); // Saving the stack
-                *asm += andq(reg!(RSP), immq(-16)); // Align the stack
-                *asm += movq(reg!(RDI), reg!(RAX));
+            fn call_extern(asm: &mut Text, label: reg::Label) {
+                *asm += movq(reg!(RSP), reg!(RBX)); // Saving the stack
+                *asm += andq(immq(-16), reg!(RSP)); // Align the stack
+                *asm += movq(reg!(RAX), reg!(RDI)); // Move the argument
 
                 *asm += call(label);
 
-                *asm += movq(reg!(RSP), reg!(RBX)); // Restoring the stack
+                *asm += movq(reg!(RBX), reg!(RSP)); // Restoring the stack
             }
 
             // malloc
@@ -82,7 +82,7 @@ fn compile_expr(
                     fun_id,
                 );
 
-                align_stack(asm, reg::Label::from_str("malloc".to_string()));
+                call_extern(asm, reg::Label::from_str("malloc".to_string()));
             }
             // putchar
             else if name.inner == 1 {
@@ -95,7 +95,7 @@ fn compile_expr(
                     fun_id,
                 );
 
-                align_stack(asm, reg::Label::from_str("putchar".to_string()));
+                call_extern(asm, reg::Label::from_str("putchar".to_string()));
             } else {
                 let arity = args.len();
                 for arg in args.into_iter().rev() {
@@ -128,8 +128,8 @@ fn compile_expr(
         Expr::Addr(e) => push_addr(*e, asm, variables, name_of, deps, fun_id),
         Expr::Not(e) => {
             compile_expr(*e, asm, variables, name_of, deps, fun_id);
-            *asm += movq(reg!(RBX), reg!(RAX));
-            *asm += xorq(reg!(RAX), reg!(RAX));
+            *asm += movq(reg!(RAX), reg!(RBX));
+            *asm += movq(immq(0), reg!(RAX));
             *asm += cmpq(reg!(RBX), immq(0));
             *asm += set(instr::Cond::Z, reg!(AL));
         }
@@ -144,65 +144,67 @@ fn compile_expr(
             compile_expr(*lhs, asm, variables, name_of, deps, fun_id);
             *asm += pushq(reg!(RAX));
             compile_expr(*rhs, asm, variables, name_of, deps, fun_id);
-            *asm += movq(reg!(RBX), reg!(RAX));
+            *asm += movq(reg!(RAX), reg!(RBX));
             *asm += popq(RAX);
             match op {
                 BinOp::Eq => {
                     *asm += cmpq(reg!(RAX), reg!(RBX));
-                    *asm += xorq(reg!(RAX), reg!(RAX));
                     *asm += set(instr::Cond::Z, reg!(AL));
+		    *asm += movzbq(reg!(AL), RAX);
                 }
                 BinOp::NEq => {
                     *asm += cmpq(reg!(RAX), reg!(RBX));
-                    *asm += xorq(reg!(RAX), reg!(RAX));
                     *asm += set(instr::Cond::Z, reg!(AL));
+		    *asm += movzbq(reg!(AL), RAX);
                     *asm += notq(reg!(RAX));
                 }
                 BinOp::Lt => {
                     *asm += cmpq(reg!(RAX), reg!(RBX));
-                    *asm += xorq(reg!(RAX), reg!(RAX));
                     *asm += set(instr::Cond::L, reg!(AL));
+		    *asm += movzbq(reg!(AL), RAX);
                 }
                 BinOp::Le => {
                     *asm += cmpq(reg!(RAX), reg!(RBX));
-                    *asm += xorq(reg!(RAX), reg!(RAX));
                     *asm += set(instr::Cond::LE, reg!(AL));
+		    *asm += movzbq(reg!(AL), RAX);
                 }
                 BinOp::Gt => {
                     *asm += cmpq(reg!(RAX), reg!(RBX));
-                    *asm += xorq(reg!(RAX), reg!(RAX));
                     *asm += set(instr::Cond::G, reg!(AL));
+		    *asm += movzbq(reg!(AL), RAX);
                 }
                 BinOp::Ge => {
                     *asm += cmpq(reg!(RAX), reg!(RBX));
-                    *asm += xorq(reg!(RAX), reg!(RAX));
                     *asm += set(instr::Cond::GE, reg!(AL));
+		    *asm += movzbq(reg!(AL), RAX);
                 }
                 BinOp::Add => {
-                    *asm += addq(reg!(RAX), reg!(RBX));
+                    *asm += addq(reg!(RBX), reg!(RAX));
                 }
                 BinOp::Sub => {
-                    *asm += subq(reg!(RAX), reg!(RBX));
+                    *asm += subq(reg!(RBX), reg!(RAX));
                 }
                 BinOp::Mul => {
-                    *asm += imulq(reg!(RAX), reg!(RBX));
+                    *asm += imulq(reg!(RBX), reg!(RAX));
                 }
                 BinOp::Div => {
+		    *asm += movq(immq(0), reg!(RDX));
                     *asm += divq(reg!(RBX));
                 }
                 BinOp::Mod => {
+		    *asm += movq(immq(0), reg!(RDX));
                     *asm += divq(reg!(RBX));
-                    *asm += movq(reg!(RAX), reg!(RDX));
+                    *asm += movq(reg!(RDX), reg!(RAX));
                 }
                 BinOp::BAnd => {
-                    *asm += andq(reg!(RAX), reg!(RBX));
+                    *asm += andq(reg!(RBX), reg!(RAX));
                 }
                 BinOp::BOr => {
-                    *asm += orq(reg!(RAX), reg!(RBX));
+                    *asm += orq(reg!(RBX), reg!(RAX));
                 }
             }
         }
-        Expr::SizeOf(_) => *asm += movq(reg!(RAX), immq(8)),
+        Expr::SizeOf(_) => *asm += movq(immq(8), reg!(RAX)),
     }
 }
 
@@ -335,7 +337,7 @@ fn compile_instr(
             if let Some(e) = opt_e {
                 compile_expr(e, asm, variables, name_of, deps, fun_id);
             } else {
-                *asm += movq(reg!(RAX), immq(0));
+                *asm += movq(immq(0), reg!(RAX));
             }
             *asm += leave();
             *asm += ret()
@@ -365,7 +367,7 @@ fn compile_block(
         variable_names.push(new_var);
         variables.insert(new_var, -8 * (variables.len() + 1) as i64);
     }
-    *asm += subq(reg!(RSP), immq(8 * variables.len() as i64));
+    *asm += subq(immq(8 * variables.len() as i64), reg!(RSP));
 
     for decl_or_instr in block.inner {
         // We don't have to handle var_decl with value since the typechecker remove them
@@ -392,7 +394,7 @@ fn compile_block(
         }
     }
 
-    *asm += addq(reg!(RSP), immq(variables.len() as i64));
+    *asm += addq(immq(variables.len() as i64), reg!(RSP));
 }
 
 fn compile_fun(
@@ -409,7 +411,7 @@ fn compile_fun(
         name_of[fun_decl.inner.name.inner].clone(),
     ));
     *asm += pushq(reg!(RBP));
-    *asm += movq(reg!(RBP), reg!(RSP));
+    *asm += movq(reg!(RSP), reg!(RBP));
 
     let mut old_variables = Vec::new();
     for (nb, (_, arg)) in fun_decl.inner.params.iter().enumerate() {
@@ -427,7 +429,8 @@ fn compile_fun(
         fun_id,
         fun_stack,
     );
-    *asm += movq(reg!(RAX), immq(0));
+    *asm += movq(immq(0), reg!(RAX));
+    *asm += leave();
     *asm += ret();
 
     for (id, old) in old_variables {
