@@ -2,10 +2,18 @@
 
 shopt -s nullglob
 
+assemble() {
+    gcc -no-pie -z noexecstack $1
+}
+
+run() {
+    ./a.out >result
+}
+
 # script de test pour le projet de compilation
 
 option=$1
-compilo=$2
+compilo=../$2
 score=0
 max=0
 bonus=0
@@ -36,8 +44,8 @@ test_gcc() {
 	echo "test gcc sur $f"
 	expected=exec/`basename $f .c`.out
 	if gcc $f > /dev/null 2>&1 ; then
-	    ./a.out > out
-	    if ! cmp --quiet out $expected; then
+	    run
+	    if ! cmp --quiet result $expected; then
 		echo "mauvaise sortie de gcc sur $f"
 	    fi
 	else
@@ -46,7 +54,7 @@ test_gcc() {
     done
 }
 
-compile () {
+compile() {
     if [[ $verbose != 0 ]]; then
 	echo Compile $1 $2
 	$compilo $1 $2
@@ -58,7 +66,7 @@ compile () {
 
 # partie 1 : tests d'analyse syntaxique
 
-partie1 () {
+partie1() {
 
     score=0
     max=0
@@ -68,13 +76,13 @@ partie1 () {
 
     # les mauvais
     echo -n "mauvais "
-    for f in tests/syntax/bad/*.c; do
+    for f in syntax/bad/*.c; do
 	b=`basename $f`
 	if [[ $bonus == 0 ]] && [[ $b == nested* ]]; then
             continue
 	fi
-	max=`expr $max + 1`;
-	compile --parse-only $f;
+	max=`expr $max + 1`
+	compile --parse-only $f
 	case $? in
 	    "0")
 		echo -n "X"
@@ -91,7 +99,7 @@ partie1 () {
 
     # les bons
     echo -n "bons "
-    for f in tests/syntax/good/*.c tests/typing/bad/*.c tests/typing/good/*.c tests/exec/*.c tests/exec-fail/*.c; do
+    for f in syntax/good/*.c typing/bad/*.c typing/good/*.c exec/*.c exec-fail/*.c; do
 	b=`basename $f`
 	if [[ $bonus == 0 ]] && [[ $b == nested* ]]; then
             continue
@@ -123,7 +131,7 @@ partie1 () {
 # partie 2 : tests d'analyse sémantique
 
 
-partie2 () {
+partie2() {
     echo
     echo "Partie 2"
 
@@ -133,7 +141,7 @@ partie2 () {
 
     # les mauvais
     echo -n "mauvais "
-    for f in tests/typing/bad/*.c; do
+    for f in typing/bad/*.c; do
 	b=`basename $f`
 	if [[ $bonus == 0 ]] && [[ $b == nested* ]]; then
             continue
@@ -157,7 +165,7 @@ partie2 () {
 
     # les bons
     echo -n "bons "
-    for f in tests/typing/good/*.c tests/exec/*.c tests/exec-fail/*.c; do
+    for f in typing/good/*.c exec/*.c exec-fail/*.c; do
 	b=`basename $f`
 	if [[ $bonus == 0 ]] && [[ $b == nested* ]]; then
             continue
@@ -190,7 +198,7 @@ partie2 () {
 
 # partie 3 : tests d'exécution
 
-partie3 () {
+partie3() {
 
     score_comp=0
     score_out=0
@@ -214,14 +222,14 @@ partie3 () {
 	asm=exec/`basename $f .c`.s
 	rm -f $asm
 	expected=exec/`basename $f .c`.out
-	max=`expr $max + 1`;
+	max=`expr $max + 1`
 	if compile $f; then
-	    rm -f out
-	    score_comp=`expr $score_comp + 1`;
-	    if gcc -no-pie $asm && ./a.out > out; then
-		score_out=`expr $score_out + 1`;
-		if cmp --quiet out $expected; then
-		    score_test=`expr $score_test + 1`;
+	    rm -f result
+	    score_comp=`expr $score_comp + 1`
+	    if assemble $asm && run; then
+		score_out=`expr $score_out + 1`
+		if cmp --quiet result $expected; then
+		    score_test=`expr $score_test + 1`
 		else
 		    echo
 		    echo "ECHEC : mauvaise sortie pour $f"
@@ -240,23 +248,23 @@ partie3 () {
     echo "Execution conduisant à un échec"
     echo "-------------------------------"
 
-    for f in tests/exec-fail/*.c; do
+    for f in exec-fail/*.c; do
 	b=`basename $f`
 	if [[ $bonus == 0 ]] && [[ $b == nested* ]]; then
             continue
 	fi
 	echo -n "."
-	asm=tests/exec-fail/`basename $f .c`.s
+	asm=exec-fail/`basename $f .c`.s
 	rm -f $asm
-	max=`expr $max + 1`;
-	if compile $f && gcc -no-pie $asm; then
-	    score_comp=`expr $score_comp + 1`;
-	    if ./a.out > out; then
+	max=`expr $max + 1`
+	if compile $f && assemble $asm; then
+	    score_comp=`expr $score_comp + 1`
+	    if run; then
 		echo
 		echo "ECHEC : devrait échouer sur $f"
 	    else
-		score_test=`expr $score_test + 1`;
-		score_out=`expr $score_out + 1`;
+		score_test=`expr $score_test + 1`
+		score_out=`expr $score_out + 1`
 	    fi
 	else
 	    echo
@@ -265,16 +273,18 @@ partie3 () {
     done
 
     echo
-    percent=`expr 100 \* $score / $max`;
+    percent=`expr 100 \* $score / $max`
 
-    echo "Compilation:";
-    percent=`expr 100 \* $score_comp / $max`;
-    echo "Compilation : $score_comp/$max : $percent%";
-    percent=`expr 100 \* $score_out / $max`;
-    echo "Code produit : $score_out/$max : $percent%";
-    percent=`expr 100 \* $score_test / $max`;
-    echo "Comportement du code : $score_test/$max : $percent%";}
+    echo "Compilation:"
+    percent=`expr 100 \* $score_comp / $max`
+    echo "Compilation : $score_comp/$max : $percent%"
+    percent=`expr 100 \* $score_out / $max`
+    echo "Code produit : $score_out/$max : $percent%"
+    percent=`expr 100 \* $score_test / $max`
+    echo "Comportement du code : $score_test/$max : $percent%"
+}
 
+cd tests
 
 case $option in
     "-1" )
@@ -284,22 +294,22 @@ case $option in
     "-3" )
         partie3;;
     "-1b" )
-	bonus=1;
+	bonus=1
 	partie1;;
     "-2b" )
-    	bonus=1;
+    	bonus=1
         partie2;;
     "-3b" )
-    	bonus=1;
+    	bonus=1
         partie3;;
     "-all" )
-    	partie1;
-    	partie2;
+    	partie1
+    	partie2
     	partie3;;
     "-allb" )
-        bonus=1;
-    	partie1;
-    	partie2;
+        bonus=1
+    	partie1
+    	partie2
     	partie3;;
     "-gcc" )
         test_gcc;;
