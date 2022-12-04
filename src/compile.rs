@@ -149,33 +149,33 @@ fn compile_expr(
             *asm += popq(RAX);
             match op {
                 BinOp::Eq => {
-                    *asm += cmpq(reg!(RAX), reg!(RBX));
+                    *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::Z, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
                 BinOp::NEq => {
-                    *asm += cmpq(reg!(RAX), reg!(RBX));
+                    *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::Z, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                     *asm += notq(reg!(RAX));
                 }
                 BinOp::Lt => {
-                    *asm += cmpq(reg!(RAX), reg!(RBX));
+                    *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::L, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
                 BinOp::Le => {
-                    *asm += cmpq(reg!(RAX), reg!(RBX));
+                    *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::LE, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
                 BinOp::Gt => {
-                    *asm += cmpq(reg!(RAX), reg!(RBX));
+                    *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::G, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
                 BinOp::Ge => {
-                    *asm += cmpq(reg!(RAX), reg!(RBX));
+                    *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::GE, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
@@ -247,9 +247,11 @@ fn compile_instr(
                 new_label(&format!("else{}", format_span(&instr.span)));
             let endif_label =
                 new_label(&format!("endif{}", format_span(&instr.span)));
+            *asm += testq(reg!(RAX), reg!(RAX));
             if else_branch.is_some() {
-                *asm += testq(reg!(RAX), reg!(RAX));
                 *asm += jz(else_label.clone());
+            } else {
+                *asm += jz(endif_label.clone());
             }
             compile_instr(
                 *then_branch,
