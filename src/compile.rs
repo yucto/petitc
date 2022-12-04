@@ -46,8 +46,10 @@ fn compile_expr(
         Expr::Int(x) => *asm += movq(immq(x), reg!(RAX)),
         Expr::True => *asm += movq(immq(1), reg!(RAX)),
         Expr::False | Expr::Null => *asm += movq(immq(0), reg!(RAX)),
-        Expr::Ident(name) => {
-            *asm += movq(addr!(variables[&name.inner], RBP), reg!(RAX))
+        inner @ Expr::Ident(_) => {
+            let e = WithType { inner, ..e };
+            push_addr(e, asm, variables, name_of, deps, fun_id);
+            *asm += movq(addr!(RAX), reg!(RAX));
         }
         Expr::Deref(e) => {
             compile_expr(*e, asm, variables, name_of, deps, fun_id);
@@ -189,11 +191,11 @@ fn compile_expr(
                 }
                 BinOp::Div => {
                     *asm += movq(immq(0), reg!(RDX));
-                    *asm += divq(reg!(RBX));
+                    *asm += idivq(reg!(RBX));
                 }
                 BinOp::Mod => {
                     *asm += movq(immq(0), reg!(RDX));
-                    *asm += divq(reg!(RBX));
+                    *asm += idivq(reg!(RBX));
                     *asm += movq(reg!(RDX), reg!(RAX));
                 }
                 BinOp::LAnd => {
@@ -311,6 +313,8 @@ fn compile_instr(
         } => {
             let for_start =
                 new_label(&format!("for{}", format_span(&instr.span)));
+            let for_incr =
+                new_label(&format!("for_incr{}", format_span(&instr.span)));
             let for_exit =
                 new_label(&format!("for_exit{}", format_span(&instr.span)));
             *asm += Text::label(for_start.clone());
@@ -322,13 +326,14 @@ fn compile_instr(
             compile_instr(
                 *body,
                 asm,
-                Some((&for_start, &for_exit)),
+                Some((&for_incr, &for_exit)),
                 variables,
                 name_of,
                 deps,
                 fun_id,
                 fun_asm,
             );
+            *asm += Text::label(for_incr);
             for incr_expr in incr {
                 compile_expr(incr_expr, asm, variables, name_of, deps, fun_id);
             }
