@@ -1441,7 +1441,11 @@ fn typecheck_instr(
                 }))
             }
             TypedInstr {
-                instr: Instr::Break,
+                instr: if let Instr::Break = instr.inner {
+                    Instr::Break
+                } else {
+                    Instr::Continue
+                },
                 span: instr.span,
                 loop_level,
                 expected_return_type,
