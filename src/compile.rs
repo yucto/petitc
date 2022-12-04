@@ -131,6 +131,8 @@ fn compile_expr(
             *asm += movq(immq(0), reg!(RAX));
             *asm += cmpq(reg!(RBX), immq(0));
             *asm += set(instr::Cond::Z, reg!(AL));
+            // We zero the rest of %rax
+            *asm += movzbq(reg!(AL), RAX);
         }
         Expr::Neg(e) => {
             compile_expr(*e, asm, variables, name_of, deps, fun_id);
@@ -195,11 +197,21 @@ fn compile_expr(
                     *asm += divq(reg!(RBX));
                     *asm += movq(reg!(RDX), reg!(RAX));
                 }
-                BinOp::BAnd => {
-                    *asm += andq(reg!(RBX), reg!(RAX));
+                BinOp::LAnd => {
+                    *asm += testq(reg!(RAX), reg!(RAX));
+                    *asm += set(instr::Cond::NZ, reg!(AL));
+                    *asm += testq(reg!(RBX), reg!(RBX));
+                    *asm += set(instr::Cond::NZ, reg!(BL));
+                    *asm += andb(reg!(BL), reg!(AL));
+                    *asm += movzbq(reg!(AL), RAX);
                 }
-                BinOp::BOr => {
-                    *asm += orq(reg!(RBX), reg!(RAX));
+                BinOp::LOr => {
+                    *asm += testq(reg!(RAX), reg!(RAX));
+                    *asm += set(instr::Cond::NZ, reg!(AL));
+                    *asm += testq(reg!(RBX), reg!(RBX));
+                    *asm += set(instr::Cond::NZ, reg!(BL));
+                    *asm += orb(reg!(BL), reg!(AL));
+                    *asm += movzbq(reg!(AL), RAX);
                 }
             }
         }

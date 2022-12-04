@@ -944,8 +944,8 @@ fn type_expr(
                 op @ (BinOp::Mul
                 | BinOp::Div
                 | BinOp::Mod
-                | BinOp::BOr
-                | BinOp::BAnd),
+                | BinOp::LOr
+                | BinOp::LAnd),
             lhs,
             rhs,
         } => {

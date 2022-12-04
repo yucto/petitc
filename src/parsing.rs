@@ -314,8 +314,8 @@ fn read_op(ast: AST) -> BinOp {
     "Leq" => Le,
     "Equal" => Eq,
     "NotEqual" => NEq,
-    "And" => BAnd,
-    "Or" => BOr,
+    "And" => LAnd,
+    "Or" => LOr,
     }}
 }
 

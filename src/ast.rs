@@ -64,7 +64,7 @@ pub enum BinOp {
     Eq, NEq,
     Lt, Le, Gt, Ge,
     Add, Sub, Mul, Div, Mod,
-    BAnd, BOr,
+    LAnd, LOr,
 }
 
 #[rustfmt::skip]
