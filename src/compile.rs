@@ -155,9 +155,8 @@ fn compile_expr(
                 }
                 BinOp::NEq => {
                     *asm += cmpq(reg!(RBX), reg!(RAX));
-                    *asm += set(instr::Cond::Z, reg!(AL));
+                    *asm += set(instr::Cond::NZ, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
-                    *asm += notq(reg!(RAX));
                 }
                 BinOp::Lt => {
                     *asm += cmpq(reg!(RBX), reg!(RAX));
