@@ -287,7 +287,14 @@ fn read_int(ast: AST) -> Expr<SpanAnnotation> {
     let mut node = node!(ast);
     match_variant! {(node) {
     "Int" => Expr::Int(value!(node => "value").parse().unwrap()),
-    "Char" => Expr::Int(value!(node => "value").as_bytes()[0].into()),
+    "Char" => Expr::Int(match value!(node => "value").chars().collect::<Vec<_>>()[..] {
+	['\\', 't'] => '\t',
+	['\\', 'n'] => '\n',
+	['\\', '\\'] => '\\',
+	['\\', '\''] => '\'',
+	[c] => c,
+	_ => unreachable!(),
+    } as u32 as i64),
     }}
 }
 
