@@ -2,10 +2,10 @@ use beans::span::Span;
 use colored::Colorize;
 
 use core::fmt;
-use std::collections::HashMap;
 
 use crate::{
     ast::*,
+    environment,
     error::{Error, ErrorKind, Result},
     parsing::{SpanAnnotation, WithSpan},
     tree::{Id, Tree},
@@ -495,7 +495,8 @@ enum Binding {
 }
 
 /// old name <=> var/fun, pos (if different from malloc and putchar), new name
-type Environment = HashMap<Ident, (Binding, Option<Span>, Ident)>;
+type Environment =
+    environment::Environment<Ident, (Binding, Option<Span>, Ident)>;
 
 fn get_fun<'env>(
     env: &'env Environment,
@@ -506,7 +507,7 @@ fn get_fun<'env>(
     &'env Option<Span>,
     Ident,
 )> {
-    if let Some((Binding::Fun(ty, args), span, new_name)) =
+    if let Some((_, (Binding::Fun(ty, args), span, new_name))) =
         env.get(&ident.inner)
     {
         Ok(((*ty, &args), span, *new_name))
@@ -523,7 +524,8 @@ fn get_var(
     ident: WithSpan<Ident>,
     name_of: &[String],
 ) -> Result<(PartialType, usize, Ident)> {
-    if let Some((Binding::Var(ty, depth), _, new_name)) = env.get(&ident.inner)
+    if let Some((_, (Binding::Var(ty, depth), _, new_name))) =
+        env.get(&ident.inner)
     {
         Ok((*ty, *depth, *new_name))
     } else {
@@ -1511,16 +1513,13 @@ fn typecheck_instr(
 // Useful only in typecheck_block
 fn assert_var_is_not_reused(
     var_name: WithSpan<Ident>,
-    new_bindings: &[(WithSpan<Ident>, Option<(Binding, Ident)>)],
+    env: &Environment,
     name_of: &[String],
 ) -> Result<()> {
-    if let Some((_, first_definition_span)) = new_bindings
-        .iter()
-        .map(|(WithSpan { inner, span, .. }, _)| (*inner, span))
-        .find(|(name, _)| *name == var_name.inner)
-    {
+    if let Some((0, (_, opt_span, _))) = env.get(&var_name.inner) {
         Err(Error::new(ErrorKind::SymbolDefinedTwice {
-            first_definition: first_definition_span.clone(),
+            // Can't be malloc or putchar, so it has a span
+            first_definition: opt_span.clone().unwrap(),
             second_definition: var_name.span,
             name: name_of[var_name.inner].clone(),
         }))
@@ -1541,9 +1540,9 @@ fn typecheck_block(
     deps: &mut Tree,
     parent: Id,
 ) -> TypedInstr<Instr<PartialTypeAnnotation>, PartialType> {
-    let mut new_bindings = Vec::new();
     let mut typed_block = Vec::new();
     let mut declared_vars = Vec::new();
+    env.begin_frame();
 
     for decl_or_instr in block.inner {
         match decl_or_instr {
@@ -1554,15 +1553,11 @@ fn typecheck_block(
                         .name
                         .clone()
                         .with_span(fun_decl.span.clone()),
-                    &new_bindings,
+                    env,
                     name_of,
                 ) {
                     report_error(error);
                 };
-                new_bindings.push((
-                    fun_decl.inner.name.clone(),
-                    env.remove(&fun_decl.inner.name.inner).map(|x| (x.0, x.2)),
-                ));
                 // typecheck_fun insert the declaration in env
                 let fun_decl =
                     typecheck_fun(fun_decl, env, name_of, deps, parent);
@@ -1581,7 +1576,7 @@ fn typecheck_block(
                         .name
                         .clone()
                         .with_span(var_decl.span.clone()),
-                    &new_bindings,
+                    env,
                     name_of,
                 ) {
                     report_error(error)
@@ -1589,14 +1584,6 @@ fn typecheck_block(
 
                 // We insert the variable name in the environment before we typecheck the
                 // potential value, because `int x = e;` <=> `int x; x = e;`
-                new_bindings.push((
-                    var_decl
-                        .inner
-                        .name
-                        .clone()
-                        .with_span(var_decl.span.clone()),
-                    env.remove(&var_decl.inner.name.inner).map(|x| (x.0, x.2)),
-                ));
                 let new_name = insert_new_var(
                     env,
                     var_decl.inner.name.inner,
@@ -1662,13 +1649,7 @@ fn typecheck_block(
         }
     }
 
-    for (name, old_binding) in new_bindings {
-        if let Some((binding, new_name)) = old_binding {
-            env.insert(name.inner, (binding, Some(name.span), new_name));
-        } else {
-            env.remove(&name.inner);
-        }
-    }
+    env.end_frame();
 
     TypedInstr {
         instr: Instr::Block(WrapTypedBlock {
@@ -1803,7 +1784,8 @@ pub fn typecheck(
         report_error(Error::new(ErrorKind::NoMainFunction));
     };
 
-    let mut env = HashMap::new();
+    let mut env = Environment::new();
+    env.begin_frame();
     // malloc
     env.insert(
         0,
