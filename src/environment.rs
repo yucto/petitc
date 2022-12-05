@@ -41,9 +41,18 @@ where
         }
     }
 
-    fn get(&self, key: &K) -> Option<&V> {
-        self.references
-            .get(key)
-            .and_then(|r| self.stack[*r.last()?].get(key))
+    /// Return the element, and how many frames above of the current frame it is.
+    fn get(&self, key: &K) -> Option<(usize, &V)> {
+        self.references.get(key).and_then(|r| {
+            let last_pos = *r.last()?;
+            Some((
+                self.stack.len() - last_pos - 1,
+                self.stack[last_pos].get(key)?,
+            ))
+        })
+    }
+
+    fn size_current_frame(&self) -> usize {
+	self.stack.last().unwrap().len()
     }
 }
