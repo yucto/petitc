@@ -12,7 +12,7 @@ List[content, separation] ::=
 Empty ::=
   <>;
 
-"a compilation unit"
+"a file"
 @File ::=
   List[INCLUDE, Empty] List[FunctionDeclaration, Empty]@decls <>;
 
@@ -27,7 +27,7 @@ Type ::=
   BOOL <Bool>
   Type@pointed ASTERISK <Pointer>;
 
-"an argument"
+"a parameter"
 TypedParam ::=
   Type@type IDENT.0@name <>;
 
@@ -87,14 +87,14 @@ AddSubOp ::=
   PLUS <Add>
   MINUS <Sub>;
 
-"a comparison operator"
+"an operator"
 CmpOp ::=
   LT <Lt>
   GT <Gt>
   GEQ <Geq>
   LEQ <Leq>;
 
-"an equality operator"
+"an operator"
 EqOp ::=
   EQ <Equal>
   NEQ <NotEqual>;
@@ -132,7 +132,6 @@ Else ::=
 Block ::=
   LBRACE List[DeclStatement, Empty]@stmts RBRACE <>;
 
-"a statement"
 DeclStatement ::=
   FunctionDeclaration@declaration <Function>
   VariableDeclaration@declaration SEMICOLON <Declaration>
