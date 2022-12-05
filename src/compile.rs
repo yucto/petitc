@@ -108,6 +108,7 @@ fn compile_expr(
                 let height =
                     deps.lca(fun_id, deps.find_by_name(name.inner).unwrap());
                 *asm += movq(reg!(RBP), reg!(RAX));
+                // we retrieve the %rbp of the parent of the function
                 for _ in 0..height {
                     *asm += movq(addr!(16, RAX), reg!(RAX));
                 }
@@ -118,7 +119,7 @@ fn compile_expr(
                 *asm += popq(RBX);
                 // pop args
                 for _ in 0..arity {
-                    *asm += pushq(reg!(RBX));
+                    *asm += popq(RBX);
                 }
             }
         }
@@ -377,7 +378,7 @@ fn compile_block(
     let mut variable_names = Vec::new();
     let mut old_variables = HashMap::new();
 
-    for new_var in block.declared_vars {
+    for new_var in block.declared_vars.into_iter() {
         if let Some(offset) = variables.remove(&new_var) {
             old_variables.insert(new_var, offset);
         }
