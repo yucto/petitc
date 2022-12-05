@@ -986,7 +986,7 @@ fn type_expr(
             let rhs = type_expr(*rhs, depth, env, name_of);
             let mut ty1 = lhs.ty;
             let mut ty2 = rhs.ty;
-            let new_e = Expr::Op {
+            let mut new_e = Expr::Op {
                 op: BinOp::Add,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
@@ -1008,6 +1008,12 @@ fn type_expr(
             } else {
                 if ty2.is_ptr() {
                     std::mem::swap(&mut ty1, &mut ty2);
+                    let Expr::Op {op, lhs, rhs} = new_e else {unreachable!()};
+                    new_e = Expr::Op {
+                        op,
+                        lhs: rhs,
+                        rhs: lhs,
+                    };
                 }
 
                 if ty1.is_ptr() {
@@ -1021,6 +1027,22 @@ fn type_expr(
                             },
                         ))
                     }
+                    let Expr::Op {op, lhs, mut rhs} = new_e else {unreachable!()};
+                    // Pointer arithmetic must take the size of the type in account
+                    rhs = Box::new(WithType::new(
+                        Some(Expr::Op {
+                            op: BinOp::Mul,
+                            lhs: Box::new(WithType::new(
+                                Some(Expr::Int(8)),
+                                Type::INT.clone(),
+                                e.span.clone(),
+                            )),
+                            rhs,
+                        }),
+                        ty1.clone(),
+                        e.span.clone(),
+                    ));
+                    new_e = Expr::Op { op, lhs, rhs };
                     ty1
                 } else if !ty1.is_eq(&ty2) {
                     report_error(
@@ -1062,7 +1084,7 @@ fn type_expr(
             let rhs = type_expr(*rhs, depth, env, name_of);
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
-            let new_e = Expr::Op {
+            let mut new_e = Expr::Op {
                 op: BinOp::Sub,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
@@ -1084,6 +1106,22 @@ fn type_expr(
                         );
                         PartialType::ERROR
                     } else {
+                        let Expr::Op {op, lhs, mut rhs} = new_e else {unreachable!()};
+                        // Pointer arithmetic must take the size of the type in account
+                        rhs = Box::new(WithType::new(
+                            Some(Expr::Op {
+                                op: BinOp::Div,
+                                lhs: Box::new(WithType::new(
+                                    Some(Expr::Int(8)),
+                                    Type::INT.clone(),
+                                    e.span.clone(),
+                                )),
+                                rhs,
+                            }),
+                            ty1.clone(),
+                            e.span.clone(),
+                        ));
+                        new_e = Expr::Op { op, lhs, rhs };
                         PartialType::INT
                     }
                 } else if !ty2.is_eq(&PartialType::INT) {
@@ -1097,6 +1135,22 @@ fn type_expr(
                     ));
                     PartialType::ERROR
                 } else {
+                    let Expr::Op {op, lhs, mut rhs} = new_e else {unreachable!()};
+                    // Pointer arithmetic must take the size of the type in account
+                    rhs = Box::new(WithType::new(
+                        Some(Expr::Op {
+                            op: BinOp::Mul,
+                            lhs: Box::new(WithType::new(
+                                Some(Expr::Int(8)),
+                                Type::INT.clone(),
+                                e.span.clone(),
+                            )),
+                            rhs,
+                        }),
+                        ty1.clone(),
+                        e.span.clone(),
+                    ));
+                    new_e = Expr::Op { op, lhs, rhs };
                     ty1
                 }
             } else if !ty1.is_eq(&PartialType::INT) || !ty1.is_eq(&ty2) {
