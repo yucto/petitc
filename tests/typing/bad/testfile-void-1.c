@@ -3,4 +3,3 @@
 #include <stdio.h>
 void foo() {}
 int main() { int x; x = foo(); }
-

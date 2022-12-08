@@ -2,4 +2,5 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-int main() { 1++; }
+void foo() {}
+int main() { while(foo()); }

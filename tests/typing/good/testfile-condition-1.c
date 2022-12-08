@@ -1,5 +1,4 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
-
-int main() { int x; int y; y = --x = 1; }
+int main() { int *p; if(p); }

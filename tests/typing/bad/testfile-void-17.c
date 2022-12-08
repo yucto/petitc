@@ -2,4 +2,4 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-int main() { int x; x = --x--; }
+int main() { int x; int y; y = ++x = 1; }
