@@ -132,7 +132,7 @@ fn compile_expr(
             compile_expr(*e, asm, variables, name_of, deps, fun_id);
             *asm += movq(reg!(RAX), reg!(RBX));
             *asm += movq(immq(0), reg!(RAX));
-            *asm += cmpq(reg!(RBX), immq(0));
+            *asm += cmpq(immq(0), reg!(RBX));
             *asm += set(instr::Cond::Z, reg!(AL));
             // We zero the rest of %rax
             *asm += movzbq(reg!(AL), RAX);
