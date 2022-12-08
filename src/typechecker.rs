@@ -680,17 +680,32 @@ fn type_expr(
                     span: lhs.span.clone(),
                 }));
             }
+	    let var_span = match lhs.inner {
+		Expr::Ident(ref ident) => Some((ident.span.clone(), ident.inner)),
+		_ => None,
+	    };
+	    let value_span = rhs.span.clone();
             let lhs = type_expr(*lhs, depth, env, name_of);
             let rhs = type_expr(*rhs, depth, env, name_of);
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
 
             if !ty1.is_eq(&ty2) {
-                report_error(Error::new(ErrorKind::TypeMismatch {
-                    span: e.span.clone(),
-                    expected_type: ty1,
-                    found_type: ty2,
-                }));
+		if let Some((span, id)) = var_span {
+		    report_error(Error::new(ErrorKind::VariableTypeMismatch {
+			span: value_span,
+			definition_span: span,
+			expected_type: ty1,
+			found_type: ty2,
+			variable_name: name_of[id].to_string(),
+		    }));
+		} else {
+                    report_error(Error::new(ErrorKind::TypeMismatch {
+			span: e.span.clone(),
+			expected_type: ty1,
+			found_type: ty2,
+                    }));
+		}
             }
             let found_type = if ty1 == PartialType::ERROR { ty2 } else { ty1 };
             WithType::new(

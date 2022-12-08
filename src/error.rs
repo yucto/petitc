@@ -649,12 +649,14 @@ pub(crate) mod display {
         hint_message: impl fmt::Display,
         f: &mut fmt::Formatter,
     ) -> fmt::Result {
+	let left_column_size =
+	    (span.start().0 + 1).to_string().len()
+            .max((span.start().0 + 1).to_string().len())
+            .max(3);
         if hint_span.start().0 == hint_span.end().0
             && span.start().0 == span.end().0
             && span.start().0 == hint_span.end().0
         {
-            let left_column_size =
-                (span.start().0 + 1).to_string().len().max(3);
             error_report(span, left_column_size, "-->", f)?;
             left_column_newline(left_column_size, f)?;
             single_line(span, left_column_size, "", span.start().0, f)?;
@@ -705,6 +707,11 @@ pub(crate) mod display {
             }
         } else if hint_span.end() <= span.start() {
             pretty_span(hint_span, "~", hint_message, "-->", true, f)?;
+	    if span.file() == hint_span.file()
+		&& hint_span.end().0+1 < span.start().0 {
+		    left_column_with(left_column_size, "...", f)?;
+                    writeln!(f)?;
+		};
             pretty_span(
                 span,
                 "^",
@@ -715,6 +722,11 @@ pub(crate) mod display {
             )?;
         } else {
             pretty_span(span, "^", message, "-->", true, f)?;
+	    if span.file() == hint_span.file()
+		&& span.end().0+1 < hint_span.start().0 {
+		    left_column_with(left_column_size, "...", f)?;
+                    writeln!(f)?;
+		};
             pretty_span(
                 hint_span,
                 "~",
