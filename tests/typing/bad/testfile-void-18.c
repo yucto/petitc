@@ -2,6 +2,4 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-void foo() {}
-int main() { ++(foo()); }
-
+int main() { int x; x = ++x++; }

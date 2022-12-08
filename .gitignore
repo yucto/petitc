@@ -2,3 +2,5 @@ target/
 out/
 gmrs/*.c*
 /petitc
+tests/**/*.s
+/**/a.out

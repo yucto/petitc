@@ -2,4 +2,5 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-int main() { int x; int y; y = --x = 1; }
+void foo() {}
+int main() { +(foo()); }
