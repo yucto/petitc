@@ -721,7 +721,13 @@ fn type_expr(
                             op: BinOp::Add,
                             lhs: Box::new(inner_e.clone()),
                             rhs: Box::new(WithType::new(
-                                Some(Expr::Int(1)),
+                                // If we increment a pointer, we must
+                                // increment to the next address
+                                Some(if ty.is_ptr() {
+                                    Expr::Int(8)
+                                } else {
+                                    Expr::Int(1)
+                                }),
                                 PartialType::INT,
                                 inner_e.span,
                             )),
@@ -751,7 +757,11 @@ fn type_expr(
                             op: BinOp::Sub,
                             lhs: Box::new(inner_e.clone()),
                             rhs: Box::new(WithType::new(
-                                Some(Expr::Int(1)),
+                                Some(if ty.is_ptr() {
+                                    Expr::Int(8)
+                                } else {
+                                    Expr::Int(1)
+                                }),
                                 PartialType::INT,
                                 inner_e.span,
                             )),
@@ -774,7 +784,11 @@ fn type_expr(
             let inner_e = type_expr(*inner_e, depth, env, name_of);
             let ty = inner_e.ty;
             let one = Box::new(WithType::new(
-                Some(Expr::Int(1)),
+                Some(if ty.is_ptr() {
+                    Expr::Int(8)
+                } else {
+                    Expr::Int(1)
+                }),
                 PartialType::INT,
                 inner_e.span.clone(),
             ));
@@ -814,7 +828,11 @@ fn type_expr(
             let inner_e = type_expr(*inner_e, depth, env, name_of);
             let ty = inner_e.ty;
             let one = Box::new(WithType::new(
-                Some(Expr::Int(1)),
+                Some(if ty.is_ptr() {
+                    Expr::Int(8)
+                } else {
+                    Expr::Int(1)
+                }),
                 PartialType::INT,
                 inner_e.span.clone(),
             ));
