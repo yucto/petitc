@@ -1,4 +1,6 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
-int main() { 0++; }
+
+void foo() {}
+int main() { if(foo()); }

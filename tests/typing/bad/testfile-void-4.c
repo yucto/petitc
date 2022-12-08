@@ -2,4 +2,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-int main() { int x; (x+1)++; }
+void foo() {}
+int main() { for(; foo(); ); }
+
