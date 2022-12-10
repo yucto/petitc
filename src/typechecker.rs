@@ -93,12 +93,12 @@ impl fmt::Display for PartialBasisType {
 pub struct PartialTypeAnnotation;
 
 impl Annotation for PartialTypeAnnotation {
-    type Ident = DepthIdent;
+    type Ident = WithSpan<Ident>;
     type Type = WithSpan<PartialType>;
     type WrapExpr<T> = WithType<Option<T>, PartialType>;
     type WrapInstr<T> = TypedInstr<T, PartialType>;
-    type WrapBlock<T> = WrapTypedBlock<T>;
-    type WrapFunDecl<T> = TypedFunDecl<T>;
+    type WrapBlock<T> = WithSpan<T>;
+    type WrapFunDecl<T> = WithSpan<T>;
     type WrapVarDecl<T> = WithSpan<T>;
     type WrapElseBranch<T> = Option<TypedInstr<T, PartialType>>;
 }
@@ -144,7 +144,7 @@ impl File<PartialTypeAnnotation> {
             fun_decls: self
                 .fun_decls
                 .into_iter()
-                .map(|ws| ws.to_full())
+                .map(|ws| ws.map_opt(|f| f.to_full()))
                 .collect::<Option<_>>()?,
         })
     }
@@ -160,7 +160,9 @@ impl FunDecl<PartialTypeAnnotation> {
                 .into_iter()
                 .map(|(arg_ty, arg)| Some((arg_ty.to_full()?, arg)))
                 .collect::<Option<_>>()?,
-            code: self.code.to_full()?,
+            code: self.code.map_opt(|code| {
+                code.into_iter().map(|decl| decl.to_full()).collect()
+            })?,
             depth: self.depth,
         })
     }
@@ -169,7 +171,7 @@ impl FunDecl<PartialTypeAnnotation> {
 impl DeclOrInstr<PartialTypeAnnotation> {
     fn to_full(self) -> Option<DeclOrInstr<TypeAnnotation>> {
         Some(match self {
-            Self::Fun(fun) => DeclOrInstr::Fun(fun.to_full()?),
+            Self::Fun(fun) => DeclOrInstr::Fun(fun.map_opt(|f| f.to_full())?),
             Self::Var(var) => {
                 DeclOrInstr::Var(var.map_opt(|var_decl| var_decl.to_full())?)
             }
@@ -302,7 +304,9 @@ impl Instr<PartialTypeAnnotation> {
                     .collect::<Option<_>>()?,
                 body: Box::new(body.to_full()?.map_opt(|e| e.to_full())?),
             },
-            Instr::Block(block) => Instr::Block(block.to_full()?),
+            Instr::Block(block) => Instr::Block(block.map_opt(|block| {
+                block.into_iter().map(|decl| decl.to_full()).collect()
+            })?),
             Instr::Return(None) => Instr::Return(None),
             Instr::Return(Some(value)) => {
                 Instr::Return(Some(value.to_full()?.map_opt(|e| e.to_full())?))
@@ -316,12 +320,12 @@ impl Instr<PartialTypeAnnotation> {
 pub struct TypeAnnotation;
 
 impl Annotation for TypeAnnotation {
-    type Ident = DepthIdent;
+    type Ident = WithSpan<Ident>;
     type Type = WithSpan<Type>;
     type WrapExpr<T> = WithType<T, Type>;
     type WrapInstr<T> = TypedInstr<T, Type>;
-    type WrapBlock<T> = WrapTypedBlock<T>;
-    type WrapFunDecl<T> = TypedFunDecl<T>;
+    type WrapBlock<T> = WithSpan<T>;
+    type WrapFunDecl<T> = WithSpan<T>;
     type WrapVarDecl<T> = WithSpan<T>;
     type WrapElseBranch<T> = Option<TypedInstr<T, Type>>;
 }
@@ -419,68 +423,6 @@ pub type PartiallyTypedExpr = <PartialTypeAnnotation as Annotation>::WrapExpr<
 pub type TypedExpr =
     <TypeAnnotation as Annotation>::WrapExpr<Expr<TypeAnnotation>>;
 
-pub struct WrapTypedBlock<T> {
-    pub inner: T,
-    pub span: Span,
-    /// Variables declared in the block
-    pub declared_vars: Vec<usize>,
-}
-
-impl WrapTypedBlock<Vec<DeclOrInstr<PartialTypeAnnotation>>> {
-    fn to_full(
-        self,
-    ) -> Option<WrapTypedBlock<Vec<DeclOrInstr<TypeAnnotation>>>> {
-        let WrapTypedBlock {
-            inner,
-            span,
-            declared_vars,
-        } = self;
-        let inner = inner
-            .into_iter()
-            .map(|decl_or_instr| Some(decl_or_instr.to_full()?))
-            .collect::<Option<_>>()?;
-
-        Some(WrapTypedBlock {
-            inner,
-            span,
-            declared_vars,
-        })
-    }
-}
-
-#[derive(Clone)]
-pub struct DepthIdent {
-    pub inner: Ident,
-    pub span: Span,
-    pub depth: usize,
-}
-
-impl DepthIdent {
-    fn from_spanned(spanned: WithSpan<Ident>, depth: usize) -> Self {
-        Self {
-            inner: spanned.inner,
-            span: spanned.span,
-            depth,
-        }
-    }
-}
-
-pub struct TypedFunDecl<T> {
-    pub inner: T,
-    pub span: Span,
-    pub id: Id,
-}
-
-impl TypedFunDecl<FunDecl<PartialTypeAnnotation>> {
-    fn to_full(self) -> Option<TypedFunDecl<FunDecl<TypeAnnotation>>> {
-        Some(TypedFunDecl {
-            inner: self.inner.to_full()?,
-            span: self.span,
-            id: self.id,
-        })
-    }
-}
-
 pub struct TypedFile {
     pub inner: File<TypeAnnotation>,
     /// Store a tree representing which function is declared in which function
@@ -488,8 +430,7 @@ pub struct TypedFile {
 }
 
 enum Binding {
-    /// (type, depth)
-    Var(PartialType, usize),
+    Var(PartialType),
     /// (return type, arguments type)
     Fun(PartialType, Vec<PartialType>),
 }
@@ -523,11 +464,9 @@ fn get_var(
     env: &Environment,
     ident: WithSpan<Ident>,
     name_of: &[String],
-) -> Result<(PartialType, usize, Ident)> {
-    if let Some((_, (Binding::Var(ty, depth), _, new_name))) =
-        env.get(&ident.inner)
-    {
-        Ok((*ty, *depth, *new_name))
+) -> Result<(PartialType, Ident)> {
+    if let Some((_, (Binding::Var(ty), _, new_name))) = env.get(&ident.inner) {
+        Ok((*ty, *new_name))
     } else {
         Err(Error::new(ErrorKind::NameError {
             name: name_of[ident.inner].clone(),
@@ -568,29 +507,15 @@ fn insert_new_fun<'env>(
 fn insert_new_var<'env>(
     env: &'env mut Environment,
     ident: Ident,
-    var_binding: (PartialType, usize),
+    var_binding: PartialType,
     span: Span,
-    name_of: &'_ mut Vec<String>,
 ) -> Ident {
-    let new_name_str = format!("{}{}", name_of[ident], format_span(&span));
-    let new_name = name_of.len();
-    name_of.push(new_name_str);
-    env.insert(
-        ident,
-        (
-            Binding::Var(var_binding.0, var_binding.1),
-            Some(span),
-            new_name,
-        ),
-    );
-    new_name
+    env.insert(ident, (Binding::Var(var_binding), Some(span), ident));
+    ident
 }
 
-/// We get rid of the pre/postfix operation by transforming
-/// ++i in (i += 1) and i++ in (i += 1) - 1
 fn type_expr(
     e: WithSpan<Expr<SpanAnnotation>>,
-    depth: usize,
     env: &Environment,
     name_of: &[String],
 ) -> PartiallyTypedExpr {
@@ -608,16 +533,15 @@ fn type_expr(
             WithType::new(Some(Expr::Int(n)), PartialType::INT, e.span)
         }
         Expr::Ident(name) => {
-            let (ty, depth, new_name) = get_var(env, name.clone(), name_of)
+            let (ty, new_name) = get_var(env, name.clone(), name_of)
                 .unwrap_or_else(|error| {
                     report_error(error);
-                    (PartialType::ERROR, usize::MAX, name.inner)
+                    (PartialType::ERROR, name.inner)
                 });
             WithType::new(
-                Some(Expr::Ident(DepthIdent {
+                Some(Expr::Ident(WithSpan {
                     inner: new_name,
                     span: name.span,
-                    depth,
                 })),
                 ty,
                 e.span,
@@ -649,12 +573,12 @@ fn type_expr(
 			))
 		)
             }
-            let inner_e = type_expr(*inner_e, depth, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of);
             let ty = inner_e.ty.ptr();
             WithType::new(Some(Expr::Addr(Box::new(inner_e))), ty, e.span)
         }
         Expr::Deref(inner_e) => {
-            let inner_e = type_expr(*inner_e, depth, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of);
 
             let ty: PartialType = if let Some(ty) = inner_e.ty.deref_ptr() {
                 if ty.is_void() {
@@ -682,8 +606,8 @@ fn type_expr(
                     span: lhs.span.clone(),
                 }));
             }
-            let lhs = type_expr(*lhs, depth, env, name_of);
-            let rhs = type_expr(*rhs, depth, env, name_of);
+            let lhs = type_expr(*lhs, env, name_of);
+            let rhs = type_expr(*rhs, env, name_of);
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
 
@@ -711,7 +635,7 @@ fn type_expr(
                     expression_span: inner_e.span.clone(),
                 }))
             }
-            let inner_e = type_expr(*inner_e, depth, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of);
             let ty = inner_e.ty;
             WithType::new(
                 Some(Expr::Assign {
@@ -747,7 +671,7 @@ fn type_expr(
                     expression_span: inner_e.span.clone(),
                 }))
             }
-            let inner_e = type_expr(*inner_e, depth, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of);
             let ty = inner_e.ty;
             WithType::new(
                 Some(Expr::Assign {
@@ -781,7 +705,7 @@ fn type_expr(
                     expression_span: inner_e.span.clone(),
                 }))
             }
-            let inner_e = type_expr(*inner_e, depth, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of);
             let ty = inner_e.ty;
             let one = Box::new(WithType::new(
                 Some(if ty.is_ptr() {
@@ -825,7 +749,7 @@ fn type_expr(
                     expression_span: inner_e.span.clone(),
                 }))
             }
-            let inner_e = type_expr(*inner_e, depth, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of);
             let ty = inner_e.ty;
             let one = Box::new(WithType::new(
                 Some(if ty.is_ptr() {
@@ -863,7 +787,7 @@ fn type_expr(
             )
         }
         Expr::Pos(inner_e) => {
-            let inner_e = type_expr(*inner_e, depth, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of);
             let ty = inner_e.ty;
 
             if !ty.is_eq(&PartialType::INT) {
@@ -881,7 +805,7 @@ fn type_expr(
         }
         // The code here should be the same of the one at the previous branch
         Expr::Neg(inner_e) => {
-            let inner_e = type_expr(*inner_e, depth, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of);
             let ty = inner_e.ty;
 
             if !ty.is_eq(&PartialType::INT) {
@@ -898,7 +822,7 @@ fn type_expr(
             )
         }
         Expr::Not(inner_e) => {
-            let inner_e = type_expr(*inner_e, depth, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of);
             if inner_e.ty.is_void() {
                 report_error(Error::new(ErrorKind::VoidExpression {
                     span: inner_e.span.clone(),
@@ -921,8 +845,8 @@ fn type_expr(
             lhs,
             rhs,
         } => {
-            let lhs = type_expr(*lhs, depth, env, name_of);
-            let rhs = type_expr(*rhs, depth, env, name_of);
+            let lhs = type_expr(*lhs, env, name_of);
+            let rhs = type_expr(*rhs, env, name_of);
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
 
@@ -969,8 +893,8 @@ fn type_expr(
             lhs,
             rhs,
         } => {
-            let lhs = type_expr(*lhs, depth, env, name_of);
-            let rhs = type_expr(*rhs, depth, env, name_of);
+            let lhs = type_expr(*lhs, env, name_of);
+            let rhs = type_expr(*rhs, env, name_of);
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
             if !ty1.is_eq(&PartialType::INT) {
@@ -1002,8 +926,8 @@ fn type_expr(
             lhs,
             rhs,
         } => {
-            let lhs = type_expr(*lhs, depth, env, name_of);
-            let rhs = type_expr(*rhs, depth, env, name_of);
+            let lhs = type_expr(*lhs, env, name_of);
+            let rhs = type_expr(*rhs, env, name_of);
             let mut ty1 = lhs.ty;
             let mut ty2 = rhs.ty;
             let mut new_e = Expr::Op {
@@ -1100,8 +1024,8 @@ fn type_expr(
             lhs,
             rhs,
         } => {
-            let lhs = type_expr(*lhs, depth, env, name_of);
-            let rhs = type_expr(*rhs, depth, env, name_of);
+            let lhs = type_expr(*lhs, env, name_of);
+            let rhs = type_expr(*rhs, env, name_of);
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
             let mut new_e = Expr::Op {
@@ -1217,7 +1141,7 @@ fn type_expr(
             let mut typed_args = Vec::new();
 
             for (arg, ty) in args.into_iter().zip(args_ty.iter()) {
-                let arg = type_expr(arg, depth, env, name_of);
+                let arg = type_expr(arg, env, name_of);
                 let arg_ty = arg.ty;
 
                 if !arg_ty.is_eq(ty) {
@@ -1233,10 +1157,9 @@ fn type_expr(
 
             WithType::new(
                 Some(Expr::Call {
-                    name: DepthIdent {
+                    name: WithSpan {
                         inner: new_name,
                         span: name.span,
-                        depth,
                     },
                     args: typed_args,
                 }),
@@ -1251,7 +1174,6 @@ fn type_expr(
 fn typecheck_instr(
     instr: WithSpan<Instr<SpanAnnotation>>,
     loop_level: usize,
-    depth: usize,
     expected_return_type: PartialType,
     env: &mut Environment,
     name_of: &mut Vec<String>,
@@ -1266,7 +1188,7 @@ fn typecheck_instr(
             expected_return_type,
         },
         Instr::ExprInstr(e) => TypedInstr {
-            instr: Instr::ExprInstr(type_expr(e, depth, env, name_of)),
+            instr: Instr::ExprInstr(type_expr(e, env, name_of)),
             span: instr.span,
             loop_level,
             expected_return_type,
@@ -1276,11 +1198,10 @@ fn typecheck_instr(
             then_branch,
             else_branch,
         } => {
-            let cond = type_expr(cond, depth, env, name_of);
+            let cond = type_expr(cond, env, name_of);
             let then_branch = typecheck_instr(
                 *then_branch,
                 loop_level,
-                depth,
                 expected_return_type.clone(),
                 env,
                 name_of,
@@ -1291,7 +1212,6 @@ fn typecheck_instr(
                 Some(typecheck_instr(
                     else_branch,
                     loop_level,
-                    depth,
                     expected_return_type.clone(),
                     env,
                     name_of,
@@ -1343,11 +1263,10 @@ fn typecheck_instr(
             }
         }
         Instr::While { cond, body } => {
-            let cond = type_expr(cond, depth, env, name_of);
+            let cond = type_expr(cond, env, name_of);
             let body = typecheck_instr(
                 *body,
                 loop_level + 1,
-                depth,
                 expected_return_type.clone(),
                 env,
                 name_of,
@@ -1385,15 +1304,14 @@ fn typecheck_instr(
             incr,
             body,
         } => {
-            let cond = cond.map(|cond| type_expr(cond, depth, env, name_of));
+            let cond = cond.map(|cond| type_expr(cond, env, name_of));
             let incr = incr
                 .into_iter()
-                .map(|incr| type_expr(incr, depth, env, name_of))
+                .map(|incr| type_expr(incr, env, name_of))
                 .collect::<Vec<_>>();
             let body = Box::new(typecheck_instr(
                 *body,
                 loop_level + 1,
-                depth,
                 expected_return_type.clone(),
                 env,
                 name_of,
@@ -1453,7 +1371,6 @@ fn typecheck_instr(
                 instr.span,
             ),
             loop_level,
-            depth,
             expected_return_type,
             env,
             name_of,
@@ -1463,7 +1380,6 @@ fn typecheck_instr(
         Instr::Block(block) => typecheck_block(
             block,
             loop_level,
-            depth,
             expected_return_type,
             env,
             name_of,
@@ -1493,7 +1409,7 @@ fn typecheck_instr(
             }
         }
         Instr::Return(Some(e)) => {
-            let e = type_expr(e, depth, env, name_of);
+            let e = type_expr(e, env, name_of);
             if !e.ty.is_eq(&expected_return_type) {
                 report_error(Error::new(ErrorKind::TypeMismatch {
                     span: instr.span.clone(),
@@ -1551,7 +1467,6 @@ fn assert_var_is_not_reused(
 fn typecheck_block(
     block: Block<SpanAnnotation>,
     loop_level: usize,
-    depth: usize,
     expected_return_type: PartialType,
     env: &mut Environment,
     name_of: &mut Vec<String>,
@@ -1559,7 +1474,6 @@ fn typecheck_block(
     parent: Id,
 ) -> TypedInstr<Instr<PartialTypeAnnotation>, PartialType> {
     let mut typed_block = Vec::new();
-    let mut declared_vars = Vec::new();
     env.begin_frame();
 
     for decl_or_instr in block.inner {
@@ -1605,20 +1519,16 @@ fn typecheck_block(
                 let new_name = insert_new_var(
                     env,
                     var_decl.inner.name.inner,
-                    (var_decl.inner.ty.inner.from_basic(), depth),
+                    var_decl.inner.ty.inner.from_basic(),
                     var_decl.span.clone(),
-                    name_of,
                 );
-
-                declared_vars.push(new_name);
 
                 typed_block.push(DeclOrInstr::Var(WithSpan::new(
                     VarDecl {
                         ty: var_decl.inner.ty.into(),
-                        name: DepthIdent {
+                        name: WithSpan {
                             inner: new_name,
                             span: var_decl.inner.name.span.clone(),
-                            depth,
                         },
                         value: None,
                     },
@@ -1642,7 +1552,6 @@ fn typecheck_block(
                     let typed_assign = typecheck_instr(
                         assign,
                         loop_level,
-                        depth,
                         expected_return_type,
                         env,
                         name_of,
@@ -1656,7 +1565,6 @@ fn typecheck_block(
                 typed_block.push(DeclOrInstr::Instr(typecheck_instr(
                     instr,
                     loop_level,
-                    depth,
                     expected_return_type,
                     env,
                     name_of,
@@ -1670,10 +1578,9 @@ fn typecheck_block(
     env.end_frame();
 
     TypedInstr {
-        instr: Instr::Block(WrapTypedBlock {
+        instr: Instr::Block(WithSpan {
             inner: typed_block,
             span: block.span.clone(),
-            declared_vars,
         }),
         span: block.span,
         loop_level,
@@ -1690,7 +1597,7 @@ fn typecheck_fun(
     name_of: &mut Vec<String>,
     deps: &mut Tree,
     parent: Id,
-) -> TypedFunDecl<FunDecl<PartialTypeAnnotation>> {
+) -> WithSpan<FunDecl<PartialTypeAnnotation>> {
     let code = decl
         .inner
         .params
@@ -1729,7 +1636,6 @@ fn typecheck_fun(
     let typed_instr = typecheck_block(
         WithSpan::new(code, decl.inner.code.span),
         0,
-        decl.inner.depth,
         decl.inner.ty.inner.from_basic(),
         env,
         name_of,
@@ -1748,30 +1654,23 @@ fn typecheck_fun(
         .skip(decl.inner.params.len())
         .collect();
 
-    TypedFunDecl {
+    WithSpan {
         inner: FunDecl {
             ty: decl.inner.ty.into(),
-            name: DepthIdent {
+            name: WithSpan {
                 inner: new_name,
                 span: decl.inner.name.span,
-                depth: decl.inner.depth,
             },
             params: decl
                 .inner
                 .params
                 .into_iter()
-                .map(|(left, right)| {
-                    (
-                        left.into(),
-                        DepthIdent::from_spanned(right, decl.inner.depth),
-                    )
-                })
+                .map(|(left, right)| (left.into(), right))
                 .collect(),
             code,
             depth: decl.inner.depth,
         },
         span: decl.span,
-        id,
     }
 }
 

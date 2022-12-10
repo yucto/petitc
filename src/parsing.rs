@@ -288,12 +288,12 @@ fn read_int(ast: AST) -> Expr<SpanAnnotation> {
     match_variant! {(node) {
     "Int" => Expr::Int(value!(node => "value").parse().unwrap()),
     "Char" => Expr::Int(match value!(node => "value").chars().collect::<Vec<_>>()[..] {
-	['\\', 't'] => '\t',
-	['\\', 'n'] => '\n',
-	['\\', '\\'] => '\\',
-	['\\', '\''] => '\'',
-	[c] => c,
-	_ => unreachable!(),
+    ['\\', 't'] => '\t',
+    ['\\', 'n'] => '\n',
+    ['\\', '\\'] => '\\',
+    ['\\', '\''] => '\'',
+    [c] => c,
+    _ => unreachable!(),
     } as u32 as i64),
     }}
 }
