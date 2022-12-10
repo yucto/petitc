@@ -6,8 +6,8 @@ use typechecker::TypedFile;
 
 pub mod ast;
 mod color;
+mod compile;
 mod compile_annotation;
-// mod compile;
 mod environment;
 pub mod error;
 mod parsing;
@@ -36,9 +36,9 @@ pub fn typecheck(
 }
 
 pub fn compile(
-    _path: impl AsRef<Path>,
-    _file: TypedFile,
-    _string_store: &[String],
+    path: impl AsRef<Path>,
+    file: TypedFile,
+    string_store: &[String],
 ) -> () {
-    // compile::compile(path, file, string_store).unwrap()
+    compile::compile(path, file, string_store).unwrap()
 }

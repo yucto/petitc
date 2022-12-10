@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::parsing::WithSpan;
 
 use super::{
@@ -39,8 +37,8 @@ impl From<Type> for CType {
             CType::Ptr
         } else {
             match ty.basis {
-                BasisType::Void => CType::Void,
                 BasisType::Int => CType::Int,
+                BasisType::Void => CType::Void,
                 BasisType::Bool => CType::Bool,
             }
         }
@@ -49,13 +47,17 @@ impl From<Type> for CType {
 
 pub struct CFile {
     /// List of all functions, not only the toplevel ones
-    pub fun_decls: HashMap<Ident, CFunDecl>,
+    pub fun_decls: Vec<CFunDecl>,
+    /// A tree whose nodes are functions, and
+    /// a finction is parent of another one if
+    /// the other one is declared in itself
+    pub function_dependencies: Tree,
 }
 
 pub struct CFunDecl {
     pub ty: CType,
     pub name: Ident,
-    pub params: Vec<(CType, Ident)>,
+    pub params: Vec<Ident>,
     pub code: CBlock,
     /// Store the depth of the function declaration
     pub depth: usize,
@@ -68,7 +70,7 @@ pub enum CExpr {
     Ident(DepthIdent),
     Deref(Box<CExpr>),
     Assign {
-        lhs: (Box<CExpr>, CType),
+        lhs: Box<CExpr>,
         rhs: Box<CExpr>,
     },
     Call {
@@ -136,7 +138,7 @@ fn annotate_expr(
             let (rhs, _) = annotate_expr(*rhs, env);
             (
                 CExpr::Assign {
-                    lhs: (Box::new(lhs), ty),
+                    lhs: Box::new(lhs),
                     rhs: Box::new(rhs),
                 },
                 ty,
@@ -155,10 +157,10 @@ fn annotate_expr(
                 e.ty.into(),
             )
         }
-        Expr::PrefixIncr(_) => todo!(),
-        Expr::PrefixDecr(_) => todo!(),
-        Expr::PostfixIncr(_) => todo!(),
-        Expr::PostfixDecr(_) => todo!(),
+        Expr::PrefixIncr(_)
+        | Expr::PrefixDecr(_)
+        | Expr::PostfixIncr(_)
+        | Expr::PostfixDecr(_) => unreachable!("invariant of typechecker"),
         Expr::Addr(e) => {
             let (e, _) = annotate_expr(*e, env);
             (CExpr::Addr(Box::new(e)), CType::Ptr)
@@ -261,7 +263,7 @@ fn annotate_instr(
                     parent_fun,
                     functions,
                 );
-                s += else_branch.1;
+                s = s.max(else_branch.1);
                 Some(Box::new(else_branch.0))
             } else {
                 None
@@ -430,9 +432,10 @@ fn annotate_block(
         }
     }
 
+    env.end_frame();
     CBlock {
         block: instructions,
-        size_of: max_stack_size,
+        size_of: stack + max_stack_size,
     }
 }
 
@@ -446,11 +449,19 @@ fn annotate_fun(
     functions: &mut Vec<CFunDecl>,
 ) {
     let id = deps.add_child(parent_fun, fun_decl.name.inner);
-    let params = fun_decl
-        .params
-        .into_iter()
-        .map(|(ty, name)| (ty.inner.into(), name.inner))
-        .collect();
+    let mut params = Vec::new();
+    env.begin_frame();
+    for (_, name) in fun_decl.params.into_iter() {
+        env.insert(
+            name.inner,
+            DepthIdent {
+                depth: fun_decl.depth,
+                offset: 8 * (3 + env.size_current_frame()) as i64,
+            },
+        );
+        params.push(name.inner);
+    }
+
     let code = annotate_block(
         fun_decl.code,
         env,
@@ -460,6 +471,7 @@ fn annotate_fun(
         id,
         functions,
     );
+    env.end_frame();
 
     functions.push(CFunDecl {
         ty: fun_decl.ty.inner.into(),
@@ -469,4 +481,25 @@ fn annotate_fun(
         depth: fun_decl.depth,
         id,
     })
+}
+
+pub fn annotate(file: TypedFile) -> CFile {
+    let mut deps = Tree::new();
+    let root = deps.root();
+    // malloc
+    deps.add_child(root, 0);
+    // putchar
+    deps.add_child(root, 1);
+
+    let mut fun_decls = Vec::new();
+    let mut env = Environment::new();
+
+    for fun_decl in file.fun_decls {
+        annotate_fun(fun_decl, &mut env, &mut deps, root, &mut fun_decls);
+    }
+
+    CFile {
+        fun_decls,
+        function_dependencies: deps,
+    }
 }

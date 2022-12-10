@@ -1,6 +1,6 @@
 SOURCES = src/ gmrs/petitc.lx gmrs/petitc.gr Makefile Cargo.toml flake.nix run-tests
 USEFUL_ARTIFACTS = Cargo.lock flake.lock gmrs/petitc.clx gmrs/petitc.cgr
-STEPS = 1b 2b
+STEPS = 1b 2b 3
 ifdef RELEASE
 COMPILER = ./petitc
 else

@@ -8,7 +8,6 @@ use crate::{
     environment,
     error::{Error, ErrorKind, Result},
     parsing::{SpanAnnotation, WithSpan},
-    tree::{Id, Tree},
     typing::{BasisTypable, BasisType, Type},
 };
 
@@ -423,11 +422,7 @@ pub type PartiallyTypedExpr = <PartialTypeAnnotation as Annotation>::WrapExpr<
 pub type TypedExpr =
     <TypeAnnotation as Annotation>::WrapExpr<Expr<TypeAnnotation>>;
 
-pub struct TypedFile {
-    pub inner: File<TypeAnnotation>,
-    /// Store a tree representing which function is declared in which function
-    pub function_dependencies: Tree,
-}
+pub type TypedFile = File<TypeAnnotation>;
 
 enum Binding {
     Var(PartialType),
@@ -514,6 +509,7 @@ fn insert_new_var<'env>(
     ident
 }
 
+/// replace ++i by (i = i + 1) and i++ by (i = i + 1) - 1
 fn type_expr(
     e: WithSpan<Expr<SpanAnnotation>>,
     env: &Environment,
@@ -645,13 +641,7 @@ fn type_expr(
                             op: BinOp::Add,
                             lhs: Box::new(inner_e.clone()),
                             rhs: Box::new(WithType::new(
-                                // If we increment a pointer, we must
-                                // increment to the next address
-                                Some(if ty.is_ptr() {
-                                    Expr::Int(8)
-                                } else {
-                                    Expr::Int(1)
-                                }),
+                                Some(Expr::Int(1)),
                                 PartialType::INT,
                                 inner_e.span,
                             )),
@@ -681,11 +671,7 @@ fn type_expr(
                             op: BinOp::Sub,
                             lhs: Box::new(inner_e.clone()),
                             rhs: Box::new(WithType::new(
-                                Some(if ty.is_ptr() {
-                                    Expr::Int(8)
-                                } else {
-                                    Expr::Int(1)
-                                }),
+                                Some(Expr::Int(1)),
                                 PartialType::INT,
                                 inner_e.span,
                             )),
@@ -708,11 +694,7 @@ fn type_expr(
             let inner_e = type_expr(*inner_e, env, name_of);
             let ty = inner_e.ty;
             let one = Box::new(WithType::new(
-                Some(if ty.is_ptr() {
-                    Expr::Int(8)
-                } else {
-                    Expr::Int(1)
-                }),
+                Some(Expr::Int(1)),
                 PartialType::INT,
                 inner_e.span.clone(),
             ));
@@ -752,11 +734,7 @@ fn type_expr(
             let inner_e = type_expr(*inner_e, env, name_of);
             let ty = inner_e.ty;
             let one = Box::new(WithType::new(
-                Some(if ty.is_ptr() {
-                    Expr::Int(8)
-                } else {
-                    Expr::Int(1)
-                }),
+                Some(Expr::Int(1)),
                 PartialType::INT,
                 inner_e.span.clone(),
             ));
@@ -971,22 +949,6 @@ fn type_expr(
                             },
                         ))
                     }
-                    let Expr::Op {op, lhs, mut rhs} = new_e else {unreachable!()};
-                    // Pointer arithmetic must take the size of the type in account
-                    rhs = Box::new(WithType::new(
-                        Some(Expr::Op {
-                            op: BinOp::Mul,
-                            lhs: Box::new(WithType::new(
-                                Some(Expr::Int(8)),
-                                Type::INT.clone(),
-                                e.span.clone(),
-                            )),
-                            rhs,
-                        }),
-                        ty1.clone(),
-                        e.span.clone(),
-                    ));
-                    new_e = Expr::Op { op, lhs, rhs };
                     ty1
                 } else if !ty1.is_eq(&ty2) {
                     report_error(
@@ -1028,7 +990,7 @@ fn type_expr(
             let rhs = type_expr(*rhs, env, name_of);
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
-            let mut new_e = Expr::Op {
+            let new_e = Expr::Op {
                 op: BinOp::Sub,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
@@ -1050,22 +1012,6 @@ fn type_expr(
                         );
                         PartialType::ERROR
                     } else {
-                        let Expr::Op {op, lhs, mut rhs} = new_e else {unreachable!()};
-                        // Pointer arithmetic must take the size of the type in account
-                        rhs = Box::new(WithType::new(
-                            Some(Expr::Op {
-                                op: BinOp::Div,
-                                lhs: Box::new(WithType::new(
-                                    Some(Expr::Int(8)),
-                                    Type::INT.clone(),
-                                    e.span.clone(),
-                                )),
-                                rhs,
-                            }),
-                            ty1.clone(),
-                            e.span.clone(),
-                        ));
-                        new_e = Expr::Op { op, lhs, rhs };
                         PartialType::INT
                     }
                 } else if !ty2.is_eq(&PartialType::INT) {
@@ -1079,22 +1025,6 @@ fn type_expr(
                     ));
                     PartialType::ERROR
                 } else {
-                    let Expr::Op {op, lhs, mut rhs} = new_e else {unreachable!()};
-                    // Pointer arithmetic must take the size of the type in account
-                    rhs = Box::new(WithType::new(
-                        Some(Expr::Op {
-                            op: BinOp::Mul,
-                            lhs: Box::new(WithType::new(
-                                Some(Expr::Int(8)),
-                                Type::INT.clone(),
-                                e.span.clone(),
-                            )),
-                            rhs,
-                        }),
-                        ty1.clone(),
-                        e.span.clone(),
-                    ));
-                    new_e = Expr::Op { op, lhs, rhs };
                     ty1
                 }
             } else if !ty1.is_eq(&PartialType::INT) || !ty1.is_eq(&ty2) {
@@ -1177,8 +1107,6 @@ fn typecheck_instr(
     expected_return_type: PartialType,
     env: &mut Environment,
     name_of: &mut Vec<String>,
-    deps: &mut Tree,
-    parent: Id,
 ) -> TypedInstr<Instr<PartialTypeAnnotation>, PartialType> {
     match instr.inner {
         Instr::EmptyInstr => TypedInstr {
@@ -1205,8 +1133,6 @@ fn typecheck_instr(
                 expected_return_type.clone(),
                 env,
                 name_of,
-                deps,
-                parent,
             );
             let else_branch = if let Some(else_branch) = *else_branch {
                 Some(typecheck_instr(
@@ -1215,8 +1141,6 @@ fn typecheck_instr(
                     expected_return_type.clone(),
                     env,
                     name_of,
-                    deps,
-                    parent,
                 ))
             } else {
                 None
@@ -1270,8 +1194,6 @@ fn typecheck_instr(
                 expected_return_type.clone(),
                 env,
                 name_of,
-                deps,
-                parent,
             );
             if cond.ty.is_void() {
                 report_error(Error::new(ErrorKind::VoidExpression {
@@ -1315,8 +1237,6 @@ fn typecheck_instr(
                 expected_return_type.clone(),
                 env,
                 name_of,
-                deps,
-                parent,
             ));
 
             if let Some(ref cond) = cond {
@@ -1374,8 +1294,6 @@ fn typecheck_instr(
             expected_return_type,
             env,
             name_of,
-            deps,
-            parent,
         ),
         Instr::Block(block) => typecheck_block(
             block,
@@ -1383,8 +1301,6 @@ fn typecheck_instr(
             expected_return_type,
             env,
             name_of,
-            deps,
-            parent,
         ),
         Instr::Return(None) => {
             if !expected_return_type.is_void() {
@@ -1470,8 +1386,6 @@ fn typecheck_block(
     expected_return_type: PartialType,
     env: &mut Environment,
     name_of: &mut Vec<String>,
-    deps: &mut Tree,
-    parent: Id,
 ) -> TypedInstr<Instr<PartialTypeAnnotation>, PartialType> {
     let mut typed_block = Vec::new();
     env.begin_frame();
@@ -1491,8 +1405,7 @@ fn typecheck_block(
                     report_error(error);
                 };
                 // typecheck_fun insert the declaration in env
-                let fun_decl =
-                    typecheck_fun(fun_decl, env, name_of, deps, parent);
+                let fun_decl = typecheck_fun(fun_decl, env, name_of, false);
                 typed_block.push(DeclOrInstr::Fun(fun_decl));
             }
             DeclOrInstr::Var(var_decl) => {
@@ -1555,8 +1468,6 @@ fn typecheck_block(
                         expected_return_type,
                         env,
                         name_of,
-                        deps,
-                        parent,
                     );
                     typed_block.push(DeclOrInstr::Instr(typed_assign));
                 }
@@ -1568,8 +1479,6 @@ fn typecheck_block(
                     expected_return_type,
                     env,
                     name_of,
-                    deps,
-                    parent,
                 )))
             }
         }
@@ -1595,8 +1504,7 @@ fn typecheck_fun(
     decl: WithSpan<FunDecl<SpanAnnotation>>,
     env: &mut Environment,
     name_of: &mut Vec<String>,
-    deps: &mut Tree,
-    parent: Id,
+    toplevel: bool,
 ) -> WithSpan<FunDecl<PartialTypeAnnotation>> {
     let code = decl
         .inner
@@ -1627,11 +1535,9 @@ fn typecheck_fun(
                 .collect(),
         ),
         Some(decl.span.clone()),
-        parent == deps.root(),
+        toplevel,
         name_of,
     );
-
-    let id = deps.add_child(parent, new_name);
 
     let typed_instr = typecheck_block(
         WithSpan::new(code, decl.inner.code.span),
@@ -1639,8 +1545,6 @@ fn typecheck_fun(
         decl.inner.ty.inner.from_basic(),
         env,
         name_of,
-        deps,
-        id,
     );
 
     let Instr::Block(mut code) =
@@ -1722,10 +1626,6 @@ pub fn typecheck(
         ),
     );
     let mut fun_decls = Vec::new();
-    let mut deps = Tree::new();
-    let root = deps.root();
-    deps.add_child(root, 0);
-    deps.add_child(root, 1);
 
     for decl in file.fun_decls {
         if let Ok((_, first_definition, _)) = get_fun(
@@ -1739,15 +1639,12 @@ pub fn typecheck(
                 name: name_of[decl.inner.name.inner].clone(),
             }));
         }
-        fun_decls.push(typecheck_fun(decl, &mut env, name_of, &mut deps, root));
+        fun_decls.push(typecheck_fun(decl, &mut env, name_of, true));
     }
 
     let errors = get_errors();
     if errors.is_empty() {
-        Ok(TypedFile {
-            inner: File { fun_decls }.to_full().unwrap(),
-            function_dependencies: deps,
-        })
+        Ok(File { fun_decls }.to_full().unwrap())
     } else {
         Err(errors)
     }
