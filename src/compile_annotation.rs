@@ -472,7 +472,6 @@ fn annotate_fun(
         functions,
     );
     env.end_frame();
-
     functions.push(CFunDecl {
         ty: fun_decl.ty.inner.into(),
         name: fun_decl.name.inner,
