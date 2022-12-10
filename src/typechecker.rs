@@ -480,7 +480,7 @@ fn insert_new_fun<'env>(
 ) -> Ident {
     let new_name = if !fun_is_toplevel && name_of[ident] != "main" {
         let new_name_str = format!(
-            "f_{}{}",
+            "fun_{}{}",
             name_of[ident],
             span.as_ref()
                 .map(format_span)
