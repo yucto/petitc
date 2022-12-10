@@ -37,6 +37,6 @@ pub fn compile(
     path: impl AsRef<Path>,
     file: TypedFile,
     string_store: &[String],
-) -> () {
+) {
     compile::compile(path, file, string_store).unwrap()
 }

@@ -369,15 +369,33 @@ impl fmt::Display for Error {
                 span,
                 expected_type,
                 found_type,
+                origin_span,
             } => {
                 display::span(span, f)?;
                 error!(
                     f,
-                    "expected type {}, found {} instead",
+                    "expected type `{}`, found `{}` instead",
                     expected_type,
                     found_type,
                 )?;
-                display::pretty_span(span, "^", "wrong type", "-->", true, f)?;
+                if let Some(origin_span) = origin_span {
+                    display::pretty_span_hint(
+                        span,
+                        "wrong type",
+                        origin_span,
+                        "conflicting type declaration",
+                        f,
+                    )?;
+                } else {
+                    display::pretty_span(
+                        span,
+                        "^",
+                        "wrong type",
+                        "-->",
+                        true,
+                        f,
+                    )?;
+                }
             }
             ErrorKind::IncrOrDecrRvalue {
                 span,
@@ -416,6 +434,27 @@ impl fmt::Display for Error {
                     true,
                     f,
                 )?;
+            }
+            ErrorKind::SymbolIsFunction {
+                name,
+                span,
+                definition_span,
+            } => {
+                display::span(span, f)?;
+                error!(f, "symbol `{}` is a function, not a variable", name,)?;
+                let message = format!("`{}` is used as a variable", name);
+                if let Some(definition_span) = definition_span {
+                    display::pretty_span_hint(
+                        span,
+                        message,
+                        definition_span,
+                        format!("`{}` is defined here", name),
+                        f,
+                    )?;
+                } else {
+                    display::pretty_span(span, "^", message, "-->", true, f)?;
+                }
+                helps.push(format!("maybe you meant to call `{name}`"));
             }
         };
         for help in helps {
@@ -497,6 +536,7 @@ pub enum ErrorKind {
         span: Span,
         expected_type: PartialType,
         found_type: PartialType,
+        origin_span: Option<Span>,
     },
     IncrOrDecrRvalue {
         span: Span,
@@ -507,6 +547,11 @@ pub enum ErrorKind {
         right_type: PartialType,
         span: Span,
         op: &'static str,
+    },
+    SymbolIsFunction {
+        name: String,
+        span: Span,
+        definition_span: Option<Span>,
     },
 }
 
@@ -649,8 +694,9 @@ pub(crate) mod display {
         hint_message: impl fmt::Display,
         f: &mut fmt::Formatter,
     ) -> fmt::Result {
-	let left_column_size =
-	    (span.start().0 + 1).to_string().len()
+        let left_column_size = (span.start().0 + 1)
+            .to_string()
+            .len()
             .max((span.start().0 + 1).to_string().len())
             .max(3);
         if hint_span.start().0 == hint_span.end().0
@@ -707,11 +753,12 @@ pub(crate) mod display {
             }
         } else if hint_span.end() <= span.start() {
             pretty_span(hint_span, "~", hint_message, "-->", true, f)?;
-	    if span.file() == hint_span.file()
-		&& hint_span.end().0+1 < span.start().0 {
-		    left_column_with(left_column_size, "...", f)?;
-                    writeln!(f)?;
-		};
+            if span.file() == hint_span.file()
+                && hint_span.end().0 + 1 < span.start().0
+            {
+                left_column_with(left_column_size, "...", f)?;
+                writeln!(f)?;
+            };
             pretty_span(
                 span,
                 "^",
@@ -722,11 +769,12 @@ pub(crate) mod display {
             )?;
         } else {
             pretty_span(span, "^", message, "-->", true, f)?;
-	    if span.file() == hint_span.file()
-		&& span.end().0+1 < hint_span.start().0 {
-		    left_column_with(left_column_size, "...", f)?;
-                    writeln!(f)?;
-		};
+            if span.file() == hint_span.file()
+                && span.end().0 + 1 < hint_span.start().0
+            {
+                left_column_with(left_column_size, "...", f)?;
+                writeln!(f)?;
+            };
             pretty_span(
                 hint_span,
                 "~",

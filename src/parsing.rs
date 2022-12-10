@@ -445,7 +445,7 @@ fn read_definition(
 ) -> WithSpan<Expr<SpanAnnotation>> {
     let mut node = node!(ast);
     read_expr(get!(node, "value"), _depth, string_store, string_assoc)
-        .with_span(node.span)
+    // .with_span(node.span)
 }
 
 fn read_variable_declaration(
