@@ -509,15 +509,21 @@ fn get_fun<'env>(
     &'env Option<Span>,
     Ident,
 )> {
-    if let Some((Binding::Fun(ty, args), span, new_name)) =
-        env.get(&ident.inner)
-    {
-        Ok(((ty.clone(), args), span, *new_name))
-    } else {
-        Err(Error::new(ErrorKind::NameError {
+    match env.get(&ident.inner) {
+        Some((Binding::Fun(ty, args), span, new_name)) => {
+            Ok(((ty.clone(), args), span, *new_name))
+        }
+        Some((Binding::Var(_, _), span, _)) => {
+            Err(Error::new(ErrorKind::SymbolIsVariable {
+                name: name_of[ident.inner].clone(),
+                span: ident.span,
+                definition_span: span.clone(),
+            }))
+        }
+        None => Err(Error::new(ErrorKind::NameError {
             name: name_of[ident.inner].clone(),
             span: ident.span,
-        }))
+        })),
     }
 }
 
@@ -527,17 +533,20 @@ fn get_var(
     name_of: &[String],
 ) -> Result<(SpannedPartialType, usize, Ident)> {
     match env.get(&ident.inner) {
-	Some((Binding::Var(ty, depth), _, new_name)) => Ok((ty.clone(), *depth, *new_name)),
-	Some((Binding::Fun(_, _), definition_span, _)) =>
-	    Err(Error::new(ErrorKind::SymbolIsFunction {
-		name: name_of[ident.inner].clone(),
-		span: ident.span,
-		definition_span: definition_span.clone(),
-	    })),
-	None => Err(Error::new(ErrorKind::NameError {
+        Some((Binding::Var(ty, depth), _, new_name)) => {
+            Ok((ty.clone(), *depth, *new_name))
+        }
+        Some((Binding::Fun(_, _), definition_span, _)) => {
+            Err(Error::new(ErrorKind::SymbolIsFunction {
+                name: name_of[ident.inner].clone(),
+                span: ident.span,
+                definition_span: definition_span.clone(),
+            }))
+        }
+        None => Err(Error::new(ErrorKind::NameError {
             name: name_of[ident.inner].clone(),
             span: ident.span,
-        }))
+        })),
     }
 }
 
@@ -933,14 +942,12 @@ fn type_expr(
             let ty2 = rhs.ty;
 
             if !ty1.is_eq(&ty2) {
-                report_error(
-                    Error::new(ErrorKind::TypeMismatch {
-                        span: rhs.span.clone(),
-                        expected_type: ty1,
-                        found_type: ty2,
-                        origin_span: None,
-                    })
-                );
+                report_error(Error::new(ErrorKind::TypeMismatch {
+                    span: rhs.span.clone(),
+                    expected_type: ty1,
+                    found_type: ty2,
+                    origin_span: None,
+                }));
             }
             WithType::new(
                 Some(Expr::Op {
@@ -1188,7 +1195,7 @@ fn type_expr(
         }
     };
     if !discarded && expr.ty.is_void() {
-	report_error(Error::new(ErrorKind::VoidExpression {
+        report_error(Error::new(ErrorKind::VoidExpression {
             span: expr.span.clone(),
         }));
     }
@@ -1322,7 +1329,8 @@ fn typecheck_instr(
             incr,
             body,
         } => {
-            let cond = cond.map(|cond| type_expr(cond, depth, env, name_of, false));
+            let cond =
+                cond.map(|cond| type_expr(cond, depth, env, name_of, false));
             let incr = incr
                 .into_iter()
                 .map(|incr| type_expr(incr, depth, env, name_of, false))

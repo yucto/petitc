@@ -441,7 +441,7 @@ impl fmt::Display for Error {
                 definition_span,
             } => {
                 display::span(span, f)?;
-                error!(f, "symbol `{}` is a function, not a variable", name,)?;
+                error!(f, "symbol `{}` is a function, not a variable", name)?;
                 let message = format!("`{}` is used as a variable", name);
                 if let Some(definition_span) = definition_span {
                     display::pretty_span_hint(
@@ -455,6 +455,26 @@ impl fmt::Display for Error {
                     display::pretty_span(span, "^", message, "-->", true, f)?;
                 }
                 helps.push(format!("maybe you meant to call `{name}`"));
+            }
+            ErrorKind::SymbolIsVariable {
+                name,
+                span,
+                definition_span,
+            } => {
+                display::span(span, f)?;
+                error!(f, "symbol `{}` is a variable, not a function", name)?;
+                let message = format!("`{}` is used as a function", name);
+                if let Some(definition_span) = definition_span {
+		    display::pretty_span_hint(
+			span,
+			message,
+			definition_span,
+			format!("`{}` is defined here", name),
+			f,
+                    )?;
+		} else {
+		    display::pretty_span(span, "^", message, "-->", true, f)?;
+		}
             }
         };
         for help in helps {
@@ -549,6 +569,11 @@ pub enum ErrorKind {
         op: &'static str,
     },
     SymbolIsFunction {
+        name: String,
+        span: Span,
+        definition_span: Option<Span>,
+    },
+    SymbolIsVariable {
         name: String,
         span: Span,
         definition_span: Option<Span>,
