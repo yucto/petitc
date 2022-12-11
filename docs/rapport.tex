@@ -90,7 +90,15 @@ C'est le cas, par exemple, de la négation logique ($!e$), dont le type est
 toujours \verb|int|, indépendemment du type de $e$, ou d'un appel à une fonction,
 dont le type de retour ne dépend pas du type des arguments.\par
 Une erreur est levée si un n\oe{}ud ne peut pas être bien typé mais tous ses enfants
-le sont.
+le sont. À terme, l'AST obtenu en fin de typage sera annoté au minimum, les annotations
+utiles à la compilation seront ajoutées dans une autre passe. Actuellement, une partie
+du travail effectué dans \verb|compile_annotation.rs| (élimination des for avec déclaration de
+variable et transformation des déclaration avec assignation en deux instructions distinctes)
+est déjà effectué dans \verb|typechecker.rs|. Pendant le typage, on rend unique les noms de toutes
+les fonctions en les remplaçant par fun_NomdelafonctionLigne-Colonne avec Ligne et Colonne les
+emplacements du début de sa déclaration dans le fichier. De plus, les expressions ++i et --i
+sont remplacées par (i = i + 1) et (i = i - 1), et les expressions i++ et i-- sont remplacées
+par les expressions (i = i + 1) - 1 et (i = i - 1) + 1.
 
 \section*{Génération d'erreurs}
 Les erreurs sont accumulées dans une variable statique. Juste avant la génération
@@ -103,11 +111,28 @@ Le sucre syntaxique interfère légèrement avec l'affichage des erreurs, dans l
 mesure où il empêche d'afficher un message d'erreur spécifique à \(e[i]\) si
 cette expression est mal typée.
 
+\section*{Annotation de compilation}
+Une fois le code typé, on peut l'annoter avec des informations utiles à la compilation.
+Notamment, on transforme toutes les variables en couple (offset, profondeur), offset représentant
+le décalage par rapport au tableau d'activation et profondeur la profondeur de la fonction parent dans
+laquelle elle a été déclarée. De plus, les opérations arithmétiques sur les pointeurs sont modifiées afin
+de prendre en compte la taille du type (p + 1 se traduit en p + 8 si p est de type int*). Enfin,
+on construit un arbre de dépendances des fonctions pour savoir dans quelle fonction a été déclarée
+telle fonction, on élimine les constructions qui ne sont plus utiles (comme les boucles for avec
+déclaration de variable), et on calcule pour chaque bloc la taille maximum de pile dont il a besoin,
+pour qu'à la compilation, une fonction puisse allouer en une fois toute la pile dont elle a besoin.
+
 \section*{Génération de code}
 La génération du code repose sur la librairie \verb|write_x86_64| de Samuel.\par
 La pile n'est pas alignée en général avant un appel de fonction, donc un petit
 préambule est généré avant chaque appel à \verb|putchar| et \verb|malloc|.\par
 Le résultat de l'évaluation d'une expression est stockée dans \verb|rax|, ce qui
-en particulier évite de bouger le résultat des appels à \verb|malloc|.
+en particulier évite de bouger le résultat des appels à \verb|malloc|. La pile
+utilisée par chaque fonction est allouée en une seule fois. Pour accéder à l'addresse
+d'une variable, un petit utilitaire push_addr se charge de calculer à combien de parent
+il faut remonter pour trouver le bon tableau d'activation. Enfin, pour un appel de fonction,
+grâce à l'arbre de dépendances, on peut trouver la profondeur du tableau d'activation de la
+fonction appelée grâce à une recherche de LCA (lowest common ancestor) dans l'arbre, sachant
+que la fonction appelée est forcément un fils direct de ce LCA.
 
 \end{document}
