@@ -163,7 +163,7 @@ fn compile_expr(
                     *asm += imulq(reg!(RBX), reg!(RAX));
                 }
                 BinOp::Div => {
-                    *asm += movq(immq(0), reg!(RDX));
+		    *asm += cqto();
                     *asm += idivq(reg!(RBX));
                 }
                 BinOp::Mod => {
