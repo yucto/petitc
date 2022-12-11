@@ -119,16 +119,7 @@ int main() {
 \end{minted}\par
 La structure de donnée utilisée pour stocker les variables présentes dans
 l'environnement est impérative. Elle consiste d'une pile de tables de hashage,
-correspondant aux portées imbriquées, et une table de hashage indiquant, pour
-chaque variable, dans quelles portées elle est définie. Pour obtenir la
-variable actuellement visible dans une portée, il suffit de regarder dans la
-table de hashage de la dernière portée de la variable en question, ce qui se
-fait en temps constant. Pour ajouter une portée, une table de hashage vide est
-ajoutée à la pile. Pour enlever une portée, une table de hashage est dépilée,
-puis, pour chaque variable qu'elle contient, on enlève la dernière valeur
-de la liste des portées dans lesquelles est présente la variable. Pour ajouter
-une variable, on l'ajoute dans la dernière table de hashage, et on ajoute la
-taille de la pile à la liste des portées dans lesquelles la variable est présente.
+correspondant aux portées imbriquées.
 \section*{Génération d'erreurs}
 Les erreurs syntaxiques sont fatales, dans le sens que le compilateur s'arrête
 à la première, sans essayer de typer ce qui a été compris. Cependant, pour rendre
