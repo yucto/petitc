@@ -16,9 +16,6 @@ pub trait Annotation {
     type WrapElseBranch<T>;
 }
 
-/// For developing purpose
-/// All bounds shall
-/// be replaced by a SpanAnnotation later
 struct DummyAnnotation;
 
 impl Annotation for DummyAnnotation {

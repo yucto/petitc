@@ -29,7 +29,15 @@ impl Tree {
 
     pub fn add_child(&mut self, parent: Id, name: Ident) -> Id {
         let id = self.graph.len();
-        self.graph.push((parent, self.depth(parent), Vec::new()));
+        self.graph.push((
+            parent,
+            if self.root() == parent {
+                0
+            } else {
+                self.depth(parent) + 1
+            },
+            Vec::new(),
+        ));
         self.graph[parent].2.push(id);
         self.assoc.insert(name, id);
         id
