@@ -72,7 +72,7 @@ L'analyse syntaxique utilise l'algorithme d'Earley. En particulier, toutes les
 opérations de scan sont retardées jusqu'à la fin du traitement d'un ensemble,
 afin de pouvoir fournir au lexer l'ensemble des tokens qui pourraient être
 reconnus.\par
-L'analyse lexicale commence par reconnaître l'entrée, ce qui donne une forêt
+L'analyse syntaxique commence par reconnaître l'entrée, ce qui donne une forêt
 de toutes les dérivations possibles. Ensuite, grâce aux règles de priorité et
 d'associativité déclarées dans la grammaire, Beans construit explicitement
 un des arbre de dérivation (en appliquant les actions sémantiques au passage).\par
@@ -95,13 +95,48 @@ utiles à la compilation seront ajoutées dans une autre passe. Actuellement, un
 du travail effectué dans \verb|compile_annotation.rs| (élimination des for avec déclaration de
 variable et transformation des déclaration avec assignation en deux instructions distinctes)
 est déjà effectué dans \verb|typechecker.rs|. Pendant le typage, on rend unique les noms de toutes
-les fonctions en les remplaçant par fun_NomdelafonctionLigne-Colonne avec Ligne et Colonne les
-emplacements du début de sa déclaration dans le fichier. De plus, les expressions ++i et --i
-sont remplacées par (i = i + 1) et (i = i - 1), et les expressions i++ et i-- sont remplacées
-par les expressions (i = i + 1) - 1 et (i = i - 1) + 1.
-
+les fonctions en les remplaçant par \verb|fun_NomdelafonctionLigne-Colonne| avec Ligne et Colonne les
+emplacements du début de sa déclaration dans le fichier. De plus, les expressions \verb|++i| et \verb|--i|
+sont remplacées par \verb|i = i + 1| et \verb|i = i - 1|, et les expressions \verb|i++| et \verb|i--| sont remplacées
+par les expressions \verb|(i = i + 1) - 1| et \verb|(i = i - 1) + 1|.\par
+En fait, cette dernière étape est fausse. En effet, dans la nouvelle expression,
+\(i\) est évaluée deux fois, et non une; si \(i\) a un effet de bord, cela pose
+problème. Le programme suivant affiche \verb|a| quand compilé par gcc, et
+\verb|b| quand compilé par notre compilateur. Ce problème sera résolu
+prochainement.
+\begin{minted}[
+  frame=lines,
+  framesep=2mm,
+  bgcolor=LightGray,
+  linenos,
+  ]{c}
+int main() {
+  int *x = malloc(2*8);
+  x[0] = 'a';
+  x[1] = 'b';
+  putchar((*(x++))++);
+}
+\end{minted}\par
+La structure de donnée utilisée pour stocker les variables présentes dans
+l'environnement est impérative. Elle consiste d'une pile de tables de hashage,
+correspondant aux portées imbriquées, et une table de hashage indiquant, pour
+chaque variable, dans quelles portées elle est définie. Pour obtenir la
+variable actuellement visible dans une portée, il suffit de regarder dans la
+table de hashage de la dernière portée de la variable en question, ce qui se
+fait en temps constant. Pour ajouter une portée, une table de hashage vide est
+ajoutée à la pile. Pour enlever une portée, une table de hashage est dépilée,
+puis, pour chaque variable qu'elle contient, on enlève la dernière valeur
+de la liste des portées dans lesquelles est présente la variable. Pour ajouter
+une variable, on l'ajoute dans la dernière table de hashage, et on ajoute la
+taille de la pile à la liste des portées dans lesquelles la variable est présente.
 \section*{Génération d'erreurs}
-Les erreurs sont accumulées dans une variable statique. Juste avant la génération
+Les erreurs syntaxiques sont fatales, dans le sens que le compilateur s'arrête
+à la première, sans essayer de typer ce qui a été compris. Cependant, pour rendre
+les messages d'erreur plus compréhensibles, le compilateur suggère toujours
+comment corriger une erreur de syntaxe. La qualité de la suggestion dépend du
+nombre de façons de corriger l'erreur: moins il y en a, plus le compilateur peut
+être précis dans sa suggestion.\par
+Les autres erreurs sont accumulées dans une variable statique. Juste avant la génération
 du code (c'est-à-dire, au dernier moment où il n'y a plus d'erreurs), s'il y a
 des erreurs, elles sont affichées, et le compilateur s'arrête.\par
 Des efforts sont faits pour mettre en contexte les messages d'erreur, y compris
@@ -129,7 +164,7 @@ préambule est généré avant chaque appel à \verb|putchar| et \verb|malloc|.\
 Le résultat de l'évaluation d'une expression est stockée dans \verb|rax|, ce qui
 en particulier évite de bouger le résultat des appels à \verb|malloc|. La pile
 utilisée par chaque fonction est allouée en une seule fois. Pour accéder à l'addresse
-d'une variable, un petit utilitaire push_addr se charge de calculer à combien de parent
+d'une variable, un petit utilitaire \verb|push_addr| se charge de calculer à combien de parent
 il faut remonter pour trouver le bon tableau d'activation. Enfin, pour un appel de fonction,
 grâce à l'arbre de dépendances, on peut trouver la profondeur du tableau d'activation de la
 fonction appelée grâce à une recherche de LCA (lowest common ancestor) dans l'arbre, sachant
