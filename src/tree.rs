@@ -58,7 +58,7 @@ impl Tree {
 
     /// Return the relative height difference of callee_func and its lca with caller_func
     /// called_func should be a direct ancestor or son-of-an-ancestor of caller_func
-    pub fn lca(&self, caller_func: Id, called_func: Id) -> usize {
+    pub fn relative_height(&self, caller_func: Id, called_func: Id) -> usize {
         let mut node = caller_func;
         while called_func != node
             && (self
@@ -70,6 +70,11 @@ impl Tree {
             // safe because of the precondition
             node = self.parent(node).unwrap();
         }
-        self.depth(node) - self.depth(caller_func)
+	if called_func == node {
+	    if let Some(parent) = self.parent(node) {
+		node = parent;
+	    }
+	}
+        self.depth(caller_func) - self.depth(node)
     }
 }

@@ -20,8 +20,9 @@ fn push_addr(
 ) {
     match e {
         CExpr::Ident(name) => {
+            let relative_depth = deps.depth(fun_id) - name.depth;
             *asm += movq(reg!(RBP), reg!(RAX));
-            for _ in name.depth..deps.depth(fun_id) {
+            for _ in 0..relative_depth {
                 *asm += movq(addr!(16, RAX), reg!(RAX));
             }
             *asm += addq(immq(name.offset), reg!(RAX));
@@ -82,18 +83,24 @@ fn compile_expr(
                 let arity = args.len();
                 for arg in args.into_iter().rev() {
                     compile_expr(*arg, asm, name_of, deps, fun_id);
-                    *asm += pushq(reg!(RAX));
+                    *asm += pushq(reg!(RAX))
+                        .add_comment(format!("arg for {}", fun_id));
                 }
                 // safe because of the typechecking
-                let height = deps.lca(fun_id, deps.find_by_name(name).unwrap());
+                let height = deps.relative_height(fun_id, deps.find_by_name(name).unwrap());
                 *asm += movq(reg!(RBP), reg!(RAX));
                 // we retrieve the %rbp of the parent of the function
                 for _ in 0..height {
                     *asm += movq(addr!(16, RAX), reg!(RAX));
                 }
-                *asm += pushq(reg!(RAX));
+                *asm += pushq(reg!(RAX)).add_comment(format!(
+                    "hidden arg for {fun_id}, height {height}"
+                ));
                 // return is in %rax
                 *asm += call(reg::Label::from_str(name_of[name].clone()));
+
+                // TODO: Removing the arguments can be done by adding to %rsp
+                //       addq (arity+1)*8, %rsp
                 // pop the parent %rbp
                 *asm += popq(RBX);
                 // pop args
@@ -163,7 +170,7 @@ fn compile_expr(
                     *asm += imulq(reg!(RBX), reg!(RAX));
                 }
                 BinOp::Div => {
-                    *asm += movq(immq(0), reg!(RDX));
+                    *asm += cqto();
                     *asm += idivq(reg!(RBX));
                 }
                 BinOp::Mod => {

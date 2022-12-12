@@ -272,7 +272,7 @@ fn annotate_instr(
                 CInstr::If {
                     cond: annotate_expr(cond, env).0,
                     then_branch: Box::new(then_branch),
-                    else_branch: else_branch,
+                    else_branch,
                     unique_id: format_span(&instr.span),
                 },
                 s,
@@ -315,7 +315,7 @@ fn annotate_instr(
                     span,
                 },
                 env,
-                stack,
+		stack,
                 depth,
                 deps,
                 parent_fun,
@@ -347,9 +347,8 @@ fn annotate_instr(
             )
         }
         Instr::Block(block) => {
-            let block = annotate_block(
-                block, env, stack, depth, deps, parent_fun, functions,
-            );
+            let block =
+                annotate_block(block, env, stack, depth, deps, parent_fun, functions);
             let new_stack = block.size_of;
             (CInstr::Block(block), new_stack)
         }
@@ -364,7 +363,7 @@ fn annotate_instr(
 fn annotate_block(
     block: WithSpan<Vec<DeclOrInstr<TypeAnnotation>>>,
     env: &mut Environment<Ident, DepthIdent>,
-    mut stack: usize,
+    previous_stack: usize,
     depth: usize,
     deps: &mut Tree,
     parent_fun: Id,
@@ -374,11 +373,13 @@ fn annotate_block(
     let mut instructions = Vec::new();
     let mut max_stack_size = 0;
 
+    let mut stack = 0;
+
     for instr_or_decl in block.inner {
         match instr_or_decl {
             DeclOrInstr::Instr(instr) => {
                 let (instr, new_stack) = annotate_instr(
-                    instr, env, stack, depth, deps, parent_fun, functions,
+                    instr, env, previous_stack+stack, depth, deps, parent_fun, functions,
                 );
                 instructions.push(instr);
                 max_stack_size = max_stack_size.max(new_stack);
@@ -389,7 +390,7 @@ fn annotate_block(
                     var_decl.inner.name.inner,
                     DepthIdent {
                         depth,
-                        offset: -(stack as i64),
+                        offset: -((previous_stack + stack) as i64),
                     },
                 );
                 if let Some(value) = var_decl.inner.value {
@@ -417,7 +418,7 @@ fn annotate_block(
                     let (instr, _) = annotate_instr(
                         assign_instr,
                         env,
-                        stack,
+                        previous_stack+stack,
                         depth,
                         deps,
                         parent_fun,
@@ -433,6 +434,7 @@ fn annotate_block(
     }
 
     env.end_frame();
+
     CBlock {
         block: instructions,
         size_of: stack + max_stack_size,
@@ -462,15 +464,8 @@ fn annotate_fun(
         params.push(name.inner);
     }
 
-    let code = annotate_block(
-        fun_decl.code,
-        env,
-        0,
-        fun_decl.depth,
-        deps,
-        id,
-        functions,
-    );
+    let code =
+        annotate_block(fun_decl.code, env, 0, fun_decl.depth, deps, id, functions);
     env.end_frame();
     functions.push(CFunDecl {
         ty: fun_decl.ty.inner.into(),
