@@ -83,8 +83,7 @@ fn compile_expr(
                 let arity = args.len();
                 for arg in args.into_iter().rev() {
                     compile_expr(*arg, asm, name_of, deps, fun_id);
-                    *asm += pushq(reg!(RAX))
-                        .add_comment(format!("arg for {}", fun_id));
+                    *asm += pushq(reg!(RAX));
                 }
                 // safe because of the typechecking
                 let height = deps.relative_height(fun_id, deps.find_by_name(name).unwrap());
@@ -93,9 +92,7 @@ fn compile_expr(
                 for _ in 0..height {
                     *asm += movq(addr!(16, RAX), reg!(RAX));
                 }
-                *asm += pushq(reg!(RAX)).add_comment(format!(
-                    "hidden arg for {fun_id}, height {height}"
-                ));
+                *asm += pushq(reg!(RAX));
                 // return is in %rax
                 *asm += call(reg::Label::from_str(name_of[name].clone()));
 
