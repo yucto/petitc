@@ -7,6 +7,8 @@ use typechecker::TypedFile;
 pub mod ast;
 mod color;
 mod compile;
+mod compile_annotation;
+mod environment;
 pub mod error;
 mod parsing;
 mod tree;

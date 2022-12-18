@@ -1,0 +1,164 @@
+\documentclass{scrartcl}
+\usepackage{cmap}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[utf8]{inputenc}
+\usepackage[french]{babel}
+\usepackage[colorlinks=true]{hyperref}
+\usepackage[outputdir=out, cache=false]{minted}
+\usepackage{xcolor}
+
+\definecolor{LightGray}{gray}{0.9}
+
+\title{Compilateur de PetitC}
+\author{%
+  Jean \textsc{Caspar},
+  Adrien \textsc{Mathieu}
+}
+\date{}
+
+\begin{document}
+\maketitle{}
+
+\section*{Prérequis et dépendances}
+Ce projet est écrit en Rust, et utilise cargo pour le compiler.\par
+Par ailleurs, nous utilisons \href{https://github.com/jthulhu/beans}{Beans}
+pour l'analyse lexicale et syntaxique. Beans utilise deux fichiers pour définir
+une grammaire:
+\begin{itemize}
+\item Un fichier de grammaire de l'analyse lexicale, \verb|gmrs/petitc.lx|.
+\item Un fichier de grammaire de l'analyse syntaxique, \verb|gmrs/petitc.gr|.
+\end{itemize}
+Pour les utiliser, il faut les compiler avec \verb|beans compile lexer gmrs/petitc.lx|
+et \verb|beans compile parser --lexer gmrs/petitc.clx gmrs/petitc.gr|. À noter
+que, pour ce faire, il faut disposer de Beans installé au préalable. Pour éviter
+que le correcteur ait à installer Beans, ces blobs sont fournis, même s'ils
+ne correspondent pas à du code source. Ils ne seront pas supprimés par
+\verb|make clean|.\par
+Si le correcteur est intéressé, et s'il utilise Emacs (ce qu'il est susceptible
+de faire), un plugin Emacs (\href{https://github.com/jthulhu/emacs-beans}{beans.el})
+est mis à disposition. Il fournit les major mode correspondants aux fichiers
+de grammaire lexicale et de grammaire syntaxique. Ce plugin
+\href{https://melpa.org/#/beans}{est disponible sur Melpa}.
+
+\section*{Analyse lexicale et syntaxique}
+\subsection*{Analyse lexicale}
+L'analyse lexicale repose sur l'abstraction en machines virtuelles plutôt que sur
+l'abstraction en automates finis. Cela correspond à la déterminisation à la volée
+des automates, ce qui permet, sans trop se fatiguer ultérieurement, de pouvoir
+autoriser la capture de groupes dans des expressions régulières, et même du
+lookahead, tout en conservant une complexité linéaire.\par
+L'analyse lexicale est basée sur le contexte fournit par le parseur. Cela
+signifie que les lexèmes qui ne servent pas au parseur à un moment donné ne
+peuvent pas être reconnus. En particulier, le programme suivant serait compilé
+sans problème, malgré le fait que \verb|int| et \verb|return| sont des mots
+réservés.
+\begin{minted}[
+  frame=lines,
+  framesep=2mm,
+  bgcolor=LightGray,
+  linenos,
+  ]{c}
+int main() {
+  int int = 'a';
+  int return = int + 5;
+  putchar(return);
+  return int / return;
+}
+\end{minted}
+
+\subsection*{Analyse syntaxique}
+L'analyse syntaxique utilise l'algorithme d'Earley. En particulier, toutes les
+opérations de scan sont retardées jusqu'à la fin du traitement d'un ensemble,
+afin de pouvoir fournir au lexer l'ensemble des tokens qui pourraient être
+reconnus.\par
+L'analyse syntaxique commence par reconnaître l'entrée, ce qui donne une forêt
+de toutes les dérivations possibles. Ensuite, grâce aux règles de priorité et
+d'associativité déclarées dans la grammaire, Beans construit explicitement
+un des arbre de dérivation (en appliquant les actions sémantiques au passage).\par
+Les expressions de la forme \(e[i]\) sont du sucre syntaxique pour \(*(e+i)\),
+ce qui signifie que ce sont des actions sémantiques de Beans qui font la
+transformation.
+
+\section*{Typage}
+Le typage annote l'AST d'informations de typage. Si jamais il est impossible
+de typer proprement un n\oe{}ud, il obtient le type \verb|{erreur}|. En général,
+si au moins un enfant d'un n\oe{}ud n'est pas bien typé (c'est-à-dire, a le type
+\verb|{erreur}|), ce n\oe{}ud aussi a le type erreur. La seule exception à cette règle
+est le cas où le type du n\oe{}ud en question ne dépend pas du type de ses enfants.
+C'est le cas, par exemple, de la négation logique ($!e$), dont le type est
+toujours \verb|int|, indépendemment du type de $e$, ou d'un appel à une fonction,
+dont le type de retour ne dépend pas du type des arguments.\par
+Une erreur est levée si un n\oe{}ud ne peut pas être bien typé mais tous ses enfants
+le sont. À terme, l'AST obtenu en fin de typage sera annoté au minimum, les annotations
+utiles à la compilation seront ajoutées dans une autre passe. Actuellement, une partie
+du travail effectué dans \verb|compile_annotation.rs| (élimination des for avec déclaration de
+variable et transformation des déclaration avec assignation en deux instructions distinctes)
+est déjà effectué dans \verb|typechecker.rs|. Pendant le typage, on rend unique les noms de toutes
+les fonctions en les remplaçant par \verb|fun_NomdelafonctionLigne-Colonne| avec Ligne et Colonne les
+emplacements du début de sa déclaration dans le fichier. De plus, les expressions \verb|++i| et \verb|--i|
+sont remplacées par \verb|i = i + 1| et \verb|i = i - 1|, et les expressions \verb|i++| et \verb|i--| sont remplacées
+par les expressions \verb|(i = i + 1) - 1| et \verb|(i = i - 1) + 1|.\par
+En fait, cette dernière étape est fausse. En effet, dans la nouvelle expression,
+\(i\) est évaluée deux fois, et non une; si \(i\) a un effet de bord, cela pose
+problème. Le programme suivant affiche \verb|a| quand compilé par gcc, et
+\verb|b| quand compilé par notre compilateur. Ce problème sera résolu
+prochainement.
+\begin{minted}[
+  frame=lines,
+  framesep=2mm,
+  bgcolor=LightGray,
+  linenos,
+  ]{c}
+int main() {
+  int *x = malloc(2*8);
+  x[0] = 'a';
+  x[1] = 'b';
+  putchar((*(x++))++);
+}
+\end{minted}\par
+La structure de donnée utilisée pour stocker les variables présentes dans
+l'environnement est impérative. Elle consiste d'une pile de tables de hashage,
+correspondant aux portées imbriquées.
+\section*{Génération d'erreurs}
+Les erreurs syntaxiques sont fatales, dans le sens que le compilateur s'arrête
+à la première, sans essayer de typer ce qui a été compris. Cependant, pour rendre
+les messages d'erreur plus compréhensibles, le compilateur suggère toujours
+comment corriger une erreur de syntaxe. La qualité de la suggestion dépend du
+nombre de façons de corriger l'erreur: moins il y en a, plus le compilateur peut
+être précis dans sa suggestion.\par
+Les autres erreurs sont accumulées dans une variable statique. Juste avant la génération
+du code (c'est-à-dire, au dernier moment où il n'y a plus d'erreurs), s'il y a
+des erreurs, elles sont affichées, et le compilateur s'arrête.\par
+Des efforts sont faits pour mettre en contexte les messages d'erreur, y compris
+quand plusieurs parties du code amènent à une erreur (et pas uniquement la
+dernière partie du code qui a amené à l'erreur), et l'afficher joliment.\par
+Le sucre syntaxique interfère légèrement avec l'affichage des erreurs, dans la
+mesure où il empêche d'afficher un message d'erreur spécifique à \(e[i]\) si
+cette expression est mal typée.
+
+\section*{Annotation de compilation}
+Une fois le code typé, on peut l'annoter avec des informations utiles à la compilation.
+Notamment, on transforme toutes les variables en couple (offset, profondeur), offset représentant
+le décalage par rapport au tableau d'activation et profondeur la profondeur de la fonction parent dans
+laquelle elle a été déclarée. De plus, les opérations arithmétiques sur les pointeurs sont modifiées afin
+de prendre en compte la taille du type (p + 1 se traduit en p + 8 si p est de type int*). Enfin,
+on construit un arbre de dépendances des fonctions pour savoir dans quelle fonction a été déclarée
+telle fonction, on élimine les constructions qui ne sont plus utiles (comme les boucles for avec
+déclaration de variable), et on calcule pour chaque bloc la taille maximum de pile dont il a besoin,
+pour qu'à la compilation, une fonction puisse allouer en une fois toute la pile dont elle a besoin.
+
+\section*{Génération de code}
+La génération du code repose sur la librairie \verb|write_x86_64| de Samuel.\par
+La pile n'est pas alignée en général avant un appel de fonction, donc un petit
+préambule est généré avant chaque appel à \verb|putchar| et \verb|malloc|.\par
+Le résultat de l'évaluation d'une expression est stockée dans \verb|rax|, ce qui
+en particulier évite de bouger le résultat des appels à \verb|malloc|. La pile
+utilisée par chaque fonction est allouée en une seule fois. Pour accéder à l'addresse
+d'une variable, un petit utilitaire \verb|push_addr| se charge de calculer à combien de parent
+il faut remonter pour trouver le bon tableau d'activation. Enfin, pour un appel de fonction,
+grâce à l'arbre de dépendances, on peut trouver la profondeur du tableau d'activation de la
+fonction appelée grâce à une recherche de LCA (lowest common ancestor) dans l'arbre, sachant
+que la fonction appelée est forcément un fils direct de ce LCA.
+
+\end{document}
