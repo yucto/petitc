@@ -86,7 +86,8 @@ fn compile_expr(
                     *asm += pushq(reg!(RAX));
                 }
                 // safe because of the typechecking
-                let height = deps.relative_height(fun_id, deps.find_by_name(name).unwrap());
+                let height = deps
+                    .relative_height(fun_id, deps.find_by_name(name).unwrap());
                 *asm += movq(reg!(RBP), reg!(RAX));
                 // we retrieve the %rbp of the parent of the function
                 for _ in 0..height {
@@ -120,7 +121,7 @@ fn compile_expr(
             compile_expr(*e, asm, name_of, deps, fun_id);
             *asm += negq(reg!(RAX));
         }
-        CExpr::Op { op, lhs, rhs } => {
+        CExpr::BinOp { op, lhs, rhs } => {
             compile_expr(*lhs, asm, name_of, deps, fun_id);
             *asm += pushq(reg!(RAX));
             compile_expr(*rhs, asm, name_of, deps, fun_id);
@@ -192,6 +193,23 @@ fn compile_expr(
                     *asm += movzbq(reg!(AL), RAX);
                 }
             }
+        }
+        CExpr::PrefixOp { op, e, arg } => {
+            push_addr(*e, asm, name_of, deps, fun_id);
+            *asm += if let CUnOp::Add = op { addq } else { subq }(
+                immq(arg),
+                addr!(RAX),
+            );
+            *asm += movq(addr!(RAX), reg!(RAX));
+        }
+        CExpr::PostfixOp { op, e, arg } => {
+            push_addr(*e, asm, name_of, deps, fun_id);
+            *asm += movq(addr!(RAX), reg!(RBX));
+            *asm += if let CUnOp::Add = op { addq } else { subq }(
+                immq(arg),
+                addr!(RAX),
+            );
+            *asm += movq(reg!(RBX), reg!(RAX));
         }
     }
 }

@@ -633,26 +633,7 @@ fn type_expr(
             }
             let inner_e = type_expr(*inner_e, env, name_of);
             let ty = inner_e.ty;
-            WithType::new(
-                Some(Expr::Assign {
-                    lhs: Box::new(inner_e.clone()),
-                    rhs: Box::new(WithType::new(
-                        Some(Expr::Op {
-                            op: BinOp::Add,
-                            lhs: Box::new(inner_e.clone()),
-                            rhs: Box::new(WithType::new(
-                                Some(Expr::Int(1)),
-                                PartialType::INT,
-                                inner_e.span,
-                            )),
-                        }),
-                        PartialType::INT,
-                        e.span.clone(),
-                    )),
-                }),
-                ty,
-                e.span,
-            )
+            WithType::new(Some(Expr::PrefixIncr(Box::new(inner_e))), ty, e.span)
         }
         Expr::PrefixDecr(inner_e) => {
             if !inner_e.inner.is_lvalue() {
@@ -663,26 +644,7 @@ fn type_expr(
             }
             let inner_e = type_expr(*inner_e, env, name_of);
             let ty = inner_e.ty;
-            WithType::new(
-                Some(Expr::Assign {
-                    lhs: Box::new(inner_e.clone()),
-                    rhs: Box::new(WithType::new(
-                        Some(Expr::Op {
-                            op: BinOp::Sub,
-                            lhs: Box::new(inner_e.clone()),
-                            rhs: Box::new(WithType::new(
-                                Some(Expr::Int(1)),
-                                PartialType::INT,
-                                inner_e.span,
-                            )),
-                        }),
-                        PartialType::INT,
-                        e.span.clone(),
-                    )),
-                }),
-                ty,
-                e.span,
-            )
+            WithType::new(Some(Expr::PrefixDecr(Box::new(inner_e))), ty, e.span)
         }
         Expr::PostfixIncr(inner_e) => {
             if !inner_e.inner.is_lvalue() {
@@ -693,33 +655,8 @@ fn type_expr(
             }
             let inner_e = type_expr(*inner_e, env, name_of);
             let ty = inner_e.ty;
-            let one = Box::new(WithType::new(
-                Some(Expr::Int(1)),
-                PartialType::INT,
-                inner_e.span.clone(),
-            ));
-            let increment = WithType::new(
-                Some(Expr::Assign {
-                    lhs: Box::new(inner_e.clone()),
-                    rhs: Box::new(WithType::new(
-                        Some(Expr::Op {
-                            op: BinOp::Add,
-                            lhs: Box::new(inner_e),
-                            rhs: one.clone(),
-                        }),
-                        PartialType::INT,
-                        e.span.clone(),
-                    )),
-                }),
-                ty,
-                e.span.clone(),
-            );
             WithType::new(
-                Some(Expr::Op {
-                    op: BinOp::Sub,
-                    lhs: Box::new(increment),
-                    rhs: one,
-                }),
+                Some(Expr::PostfixIncr(Box::new(inner_e))),
                 ty,
                 e.span,
             )
@@ -733,33 +670,8 @@ fn type_expr(
             }
             let inner_e = type_expr(*inner_e, env, name_of);
             let ty = inner_e.ty;
-            let one = Box::new(WithType::new(
-                Some(Expr::Int(1)),
-                PartialType::INT,
-                inner_e.span.clone(),
-            ));
-            let decrement = WithType::new(
-                Some(Expr::Assign {
-                    lhs: Box::new(inner_e.clone()),
-                    rhs: Box::new(WithType::new(
-                        Some(Expr::Op {
-                            op: BinOp::Sub,
-                            lhs: Box::new(inner_e),
-                            rhs: one.clone(),
-                        }),
-                        PartialType::INT,
-                        e.span.clone(),
-                    )),
-                }),
-                ty,
-                e.span.clone(),
-            );
             WithType::new(
-                Some(Expr::Op {
-                    op: BinOp::Add,
-                    lhs: Box::new(decrement),
-                    rhs: one,
-                }),
+                Some(Expr::PostfixDecr(Box::new(inner_e))),
                 ty,
                 e.span,
             )

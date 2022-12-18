@@ -4,3 +4,4 @@ gmrs/*.c*
 /petitc
 /**/a.out
 /**/*.s
+tests/result
