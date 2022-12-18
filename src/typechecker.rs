@@ -23,9 +23,8 @@ fn get_errors() -> Vec<Error> {
     unsafe { std::mem::take(&mut ERRORS) }
 }
 
-pub fn format_span(span: &beans::span::Span) -> String {
-    let start_loc = span.start();
-    format!("{}_{}", start_loc.0, start_loc.1)
+pub fn format_loc(loc: (usize, usize)) -> String {
+    format!("{}.{}", loc.0, loc.1)
 }
 
 pub(crate) type PartialType = Type<PartialBasisType>;
@@ -483,7 +482,7 @@ fn insert_new_fun<'env>(
             "fun_{}{}",
             name_of[ident],
             span.as_ref()
-                .map(format_span)
+                .map(|span| format_loc(span.start()))
                 .unwrap_or_else(|| "".to_string())
         );
         let new_name = name_of.len();

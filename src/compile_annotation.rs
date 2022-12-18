@@ -1,11 +1,12 @@
-use crate::parsing::WithSpan;
+use beans::span::Span;
 
 use super::{
     ast::*,
     environment::Environment,
+    parsing::WithSpan,
     tree::{Id, Tree},
     typechecker::*,
-    typing::{BasisType, Type},
+    typing::Type,
 };
 
 #[derive(Clone)]
@@ -24,11 +25,9 @@ pub struct CBlock {
 }
 
 #[derive(Clone, Copy)]
-pub enum CType {
-    Void,
-    Int,
-    Bool,
+enum CType {
     Ptr,
+    Other,
 }
 
 impl From<Type> for CType {
@@ -36,11 +35,7 @@ impl From<Type> for CType {
         if ty.is_ptr() {
             CType::Ptr
         } else {
-            match ty.basis {
-                BasisType::Int => CType::Int,
-                BasisType::Void => CType::Void,
-                BasisType::Bool => CType::Bool,
-            }
+            CType::Other
         }
     }
 }
@@ -55,7 +50,6 @@ pub struct CFile {
 }
 
 pub struct CFunDecl {
-    pub ty: CType,
     pub name: Ident,
     pub params: Vec<Ident>,
     pub code: CBlock,
@@ -81,7 +75,7 @@ pub enum CExpr {
     Not(Box<CExpr>),
     Neg(Box<CExpr>),
     BinOp {
-        op: BinOp,
+        op: CBinOp,
         lhs: Box<CExpr>,
         rhs: Box<CExpr>,
     },
@@ -100,6 +94,35 @@ pub enum CExpr {
 pub enum CUnOp {
     Add,
     Sub,
+}
+
+#[rustfmt::skip]
+pub enum CBinOp {
+    Eq, NEq,
+    Lt, Le, Gt, Ge,
+    Add, Sub, Mul, Div, Mod,
+    // unique identifiers for jump
+    LAnd(String), LOr(String),
+}
+
+impl From<(BinOp, Span)> for CBinOp {
+    fn from((op, span): (BinOp, Span)) -> Self {
+        match op {
+            BinOp::Eq => CBinOp::Eq,
+            BinOp::NEq => CBinOp::NEq,
+            BinOp::Lt => CBinOp::Lt,
+            BinOp::Le => CBinOp::Le,
+            BinOp::Gt => CBinOp::Gt,
+            BinOp::Ge => CBinOp::Ge,
+            BinOp::Add => CBinOp::Add,
+            BinOp::Sub => CBinOp::Sub,
+            BinOp::Mul => CBinOp::Mul,
+            BinOp::Div => CBinOp::Div,
+            BinOp::Mod => CBinOp::Mod,
+            BinOp::LAnd => CBinOp::LAnd(format_loc(span.end())),
+            BinOp::LOr => CBinOp::LOr(format_loc(span.end())),
+        }
+    }
 }
 
 pub enum CInstr {
@@ -135,9 +158,9 @@ fn annotate_expr(
     env: &Environment<Ident, DepthIdent>,
 ) -> (CExpr, CType) {
     match e.inner {
-        Expr::Int(n) => (CExpr::Int(n), CType::Int),
-        Expr::True => (CExpr::Int(1), CType::Bool),
-        Expr::False => (CExpr::Int(0), CType::Bool),
+        Expr::Int(n) => (CExpr::Int(n), CType::Other),
+        Expr::True => (CExpr::Int(1), CType::Other),
+        Expr::False => (CExpr::Int(0), CType::Other),
         Expr::Null => (CExpr::Int(1), CType::Ptr),
         Expr::Ident(id) => {
             let id = env.get(&id.inner).unwrap().1;
@@ -174,48 +197,48 @@ fn annotate_expr(
         }
         Expr::PrefixIncr(e) => {
             let (e, ty) = annotate_expr(*e, env);
-            let size = if let CType::Ptr = ty { 8 } else { 1 };
+            let arg = if let CType::Ptr = ty { 8 } else { 1 };
             (
                 CExpr::PrefixOp {
                     op: CUnOp::Add,
                     e: Box::new(e),
-                    arg: size,
+                    arg,
                 },
                 ty,
             )
         }
         Expr::PrefixDecr(e) => {
             let (e, ty) = annotate_expr(*e, env);
-            let size = if let CType::Ptr = ty { 8 } else { 1 };
+            let arg = if let CType::Ptr = ty { 8 } else { 1 };
             (
                 CExpr::PrefixOp {
                     op: CUnOp::Sub,
                     e: Box::new(e),
-                    arg: size,
+                    arg,
                 },
                 ty,
             )
         }
         Expr::PostfixIncr(e) => {
             let (e, ty) = annotate_expr(*e, env);
-            let size = if let CType::Ptr = ty { 8 } else { 1 };
+            let arg = if let CType::Ptr = ty { 8 } else { 1 };
             (
                 CExpr::PostfixOp {
                     op: CUnOp::Add,
                     e: Box::new(e),
-                    arg: size,
+                    arg,
                 },
                 ty,
             )
         }
         Expr::PostfixDecr(e) => {
             let (e, ty) = annotate_expr(*e, env);
-            let size = if let CType::Ptr = ty { 8 } else { 1 };
+            let arg = if let CType::Ptr = ty { 8 } else { 1 };
             (
                 CExpr::PostfixOp {
                     op: CUnOp::Sub,
                     e: Box::new(e),
-                    arg: size,
+                    arg,
                 },
                 ty,
             )
@@ -234,14 +257,15 @@ fn annotate_expr(
         }
         Expr::Pos(new_e) => annotate_expr(*new_e, env),
         Expr::Op { op, lhs, rhs } => {
+            let span = lhs.span.clone();
             let (lhs, ty1) = annotate_expr(*lhs, env);
             let (rhs, ty2) = annotate_expr(*rhs, env);
             match (op, ty1, ty2) {
                 (BinOp::Sub, CType::Ptr, CType::Ptr) => (
                     CExpr::BinOp {
-                        op: BinOp::Div,
+                        op: CBinOp::Div,
                         lhs: Box::new(CExpr::BinOp {
-                            op,
+                            op: (op, span).into(),
                             lhs: Box::new(lhs),
                             rhs: Box::new(rhs),
                         }),
@@ -255,10 +279,10 @@ fn annotate_expr(
                 }
                 (BinOp::Add | BinOp::Sub, CType::Ptr, _) => (
                     CExpr::BinOp {
-                        op,
+                        op: (op, span).into(),
                         lhs: Box::new(lhs),
                         rhs: Box::new(CExpr::BinOp {
-                            op: BinOp::Mul,
+                            op: CBinOp::Mul,
                             lhs: Box::new(CExpr::Int(8)),
                             rhs: Box::new(rhs),
                         }),
@@ -267,7 +291,7 @@ fn annotate_expr(
                 ),
                 _ => (
                     CExpr::BinOp {
-                        op,
+                        op: (op, span).into(),
                         lhs: Box::new(lhs),
                         rhs: Box::new(rhs),
                     },
@@ -275,7 +299,7 @@ fn annotate_expr(
                 ),
             }
         }
-        Expr::SizeOf(_) => (CExpr::Int(8), CType::Int),
+        Expr::SizeOf(_) => (CExpr::Int(8), CType::Other),
     }
 }
 
@@ -332,7 +356,7 @@ fn annotate_instr(
                     cond: annotate_expr(cond, env).0,
                     then_branch: Box::new(then_branch),
                     else_branch,
-                    unique_id: format_span(&instr.span),
+                    unique_id: format_loc(instr.span.start()),
                 },
                 s,
             )
@@ -345,7 +369,7 @@ fn annotate_instr(
                 CInstr::While {
                     cond: annotate_expr(cond, env).0,
                     body: Box::new(body.0),
-                    unique_id: format_span(&instr.span),
+                    unique_id: format_loc(instr.span.start()),
                 },
                 body.1,
             )
@@ -400,7 +424,7 @@ fn annotate_instr(
                         .map(|incr| annotate_expr(incr, env).0)
                         .collect(),
                     body: Box::new(body.0),
-                    unique_id: format_span(&instr.span),
+                    unique_id: format_loc(instr.span.start()),
                 },
                 body.1,
             )
@@ -541,7 +565,6 @@ fn annotate_fun(
     );
     env.end_frame();
     functions.push(CFunDecl {
-        ty: fun_decl.ty.inner.into(),
         name: fun_decl.name.inner,
         params,
         code,

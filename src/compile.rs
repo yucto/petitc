@@ -3,7 +3,6 @@ use write_x86_64::{traits::Writable, *};
 use std::{fs::File as StdFile, io::Write, path::Path};
 
 use super::{
-    ast::*,
     compile_annotation::*,
     error::Result,
     tree::{Id, Tree},
@@ -121,78 +120,87 @@ fn compile_expr(
             compile_expr(*e, asm, name_of, deps, fun_id);
             *asm += negq(reg!(RAX));
         }
-        CExpr::BinOp { op, lhs, rhs } => {
+        CExpr::BinOp { op, lhs, rhs }
+            if !matches!(op, CBinOp::LAnd(_) | CBinOp::LOr(_)) =>
+        {
             compile_expr(*lhs, asm, name_of, deps, fun_id);
             *asm += pushq(reg!(RAX));
             compile_expr(*rhs, asm, name_of, deps, fun_id);
             *asm += movq(reg!(RAX), reg!(RBX));
             *asm += popq(RAX);
             match op {
-                BinOp::Eq => {
+                CBinOp::Eq => {
                     *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::Z, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
-                BinOp::NEq => {
+                CBinOp::NEq => {
                     *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::NZ, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
-                BinOp::Lt => {
+                CBinOp::Lt => {
                     *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::L, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
-                BinOp::Le => {
+                CBinOp::Le => {
                     *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::LE, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
-                BinOp::Gt => {
+                CBinOp::Gt => {
                     *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::G, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
-                BinOp::Ge => {
+                CBinOp::Ge => {
                     *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::GE, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
-                BinOp::Add => {
+                CBinOp::Add => {
                     *asm += addq(reg!(RBX), reg!(RAX));
                 }
-                BinOp::Sub => {
+                CBinOp::Sub => {
                     *asm += subq(reg!(RBX), reg!(RAX));
                 }
-                BinOp::Mul => {
+                CBinOp::Mul => {
                     *asm += imulq(reg!(RBX), reg!(RAX));
                 }
-                BinOp::Div => {
+                CBinOp::Div => {
                     *asm += cqto();
                     *asm += idivq(reg!(RBX));
                 }
-                BinOp::Mod => {
+                CBinOp::Mod => {
                     *asm += movq(immq(0), reg!(RDX));
                     *asm += idivq(reg!(RBX));
                     *asm += movq(reg!(RDX), reg!(RAX));
                 }
-                BinOp::LAnd => {
-                    *asm += testq(reg!(RAX), reg!(RAX));
-                    *asm += set(instr::Cond::NZ, reg!(AL));
-                    *asm += testq(reg!(RBX), reg!(RBX));
-                    *asm += set(instr::Cond::NZ, reg!(BL));
-                    *asm += andb(reg!(BL), reg!(AL));
-                    *asm += movzbq(reg!(AL), RAX);
-                }
-                BinOp::LOr => {
-                    *asm += testq(reg!(RAX), reg!(RAX));
-                    *asm += set(instr::Cond::NZ, reg!(AL));
-                    *asm += testq(reg!(RBX), reg!(RBX));
-                    *asm += set(instr::Cond::NZ, reg!(BL));
-                    *asm += orb(reg!(BL), reg!(AL));
-                    *asm += movzbq(reg!(AL), RAX);
-                }
+                CBinOp::LAnd(_) | CBinOp::LOr(_) => unreachable!(),
             }
+        }
+        CExpr::BinOp { op, lhs, rhs } => {
+            compile_expr(*lhs, asm, name_of, deps, fun_id);
+            *asm += testq(reg!(RAX), reg!(RAX));
+            let label = if let CBinOp::LAnd(unique_id) = op {
+                let label =
+                    reg::Label::from_str(format!("endboolexpr{}", unique_id));
+                *asm += jz(label.clone());
+                label
+            } else if let CBinOp::LOr(unique_id) = op {
+                let label =
+                    reg::Label::from_str(format!("endboolexpr{}", unique_id));
+                *asm += jnz(label.clone());
+                label
+            } else {
+                unreachable!()
+            };
+            compile_expr(*rhs, asm, name_of, deps, fun_id);
+            *asm += testq(reg!(RAX), reg!(RAX));
+            *asm += Text::label(label);
+            *asm += set(instr::Cond::NZ, reg!(AL));
+            *asm += movzbq(reg!(AL), RAX);
         }
         CExpr::PrefixOp { op, e, arg } => {
             push_addr(*e, asm, name_of, deps, fun_id);
