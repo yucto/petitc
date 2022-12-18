@@ -533,12 +533,11 @@ fn insert_new_var<'env>(
     ident
 }
 
-/// replace ++i by (i = i + 1) and i++ by (i = i + 1) - 1
 fn type_expr(
     e: WithSpan<Expr<SpanAnnotation>>,
     env: &Environment,
     name_of: &[String],
-    // Whether this expression will be discarded
+    // whether this expression will be discarded
     discarded: bool,
 ) -> PartiallyTypedExpr {
     let expr = match e.inner {

@@ -11,14 +11,14 @@ use super::{
 
 /// Push the addr of the given lvalue in %rax
 fn push_addr(
-    e: CExpr,
+    e: AExpr,
     asm: &mut Text,
     name_of: &[String],
     deps: &Tree,
     fun_id: Id,
 ) {
     match e {
-        CExpr::Ident(name) => {
+        AExpr::Ident(name) => {
             let relative_depth = deps.depth(fun_id) - name.depth;
             *asm += movq(reg!(RBP), reg!(RAX));
             for _ in 0..relative_depth {
@@ -26,37 +26,37 @@ fn push_addr(
             }
             *asm += addq(immq(name.offset), reg!(RAX));
         }
-        CExpr::Deref(e) => compile_expr(*e, asm, name_of, deps, fun_id),
+        AExpr::Deref(e) => compile_expr(*e, asm, name_of, deps, fun_id),
         _ => unreachable!(),
     }
 }
 
 /// Push the expression in %rax
 fn compile_expr(
-    e: CExpr,
+    e: AExpr,
     asm: &mut Text,
     name_of: &[String],
     deps: &Tree,
     fun_id: Id,
 ) {
     match e {
-        CExpr::Int(x) => *asm += movq(immq(x), reg!(RAX)),
-        CExpr::Ident(_) => {
+        AExpr::Int(x) => *asm += movq(immq(x), reg!(RAX)),
+        AExpr::Ident(_) => {
             push_addr(e, asm, name_of, deps, fun_id);
             *asm += movq(addr!(RAX), reg!(RAX));
         }
-        CExpr::Deref(e) => {
+        AExpr::Deref(e) => {
             compile_expr(*e, asm, name_of, deps, fun_id);
             *asm += movq(addr!(RAX), reg!(RAX));
         }
-        CExpr::Assign { lhs, rhs } => {
+        AExpr::Assign { lhs, rhs } => {
             push_addr(*lhs, asm, name_of, deps, fun_id);
             *asm += pushq(reg!(RAX));
             compile_expr(*rhs, asm, name_of, deps, fun_id);
             *asm += popq(RBX);
             *asm += movq(reg!(RAX), addr!(RBX));
         }
-        CExpr::Call { name, mut args } => {
+        AExpr::Call { name, mut args } => {
             fn call_extern(asm: &mut Text, label: reg::Label) {
                 *asm += movq(reg!(RSP), reg!(RBX)); // Saving the stack
                 *asm += andq(immq(-16), reg!(RSP)); // Align the stack
@@ -106,8 +106,8 @@ fn compile_expr(
                 }
             }
         }
-        CExpr::Addr(e) => push_addr(*e, asm, name_of, deps, fun_id),
-        CExpr::Not(e) => {
+        AExpr::Addr(e) => push_addr(*e, asm, name_of, deps, fun_id),
+        AExpr::Not(e) => {
             compile_expr(*e, asm, name_of, deps, fun_id);
             *asm += movq(reg!(RAX), reg!(RBX));
             *asm += movq(immq(0), reg!(RAX));
@@ -116,12 +116,12 @@ fn compile_expr(
             // We zero the rest of %rax
             *asm += movzbq(reg!(AL), RAX);
         }
-        CExpr::Neg(e) => {
+        AExpr::Neg(e) => {
             compile_expr(*e, asm, name_of, deps, fun_id);
             *asm += negq(reg!(RAX));
         }
-        CExpr::BinOp { op, lhs, rhs }
-            if !matches!(op, CBinOp::LAnd(_) | CBinOp::LOr(_)) =>
+        AExpr::BinOp { op, lhs, rhs }
+            if !matches!(op, ABinOp::LAnd(_) | ABinOp::LOr(_)) =>
         {
             compile_expr(*lhs, asm, name_of, deps, fun_id);
             *asm += pushq(reg!(RAX));
@@ -129,66 +129,66 @@ fn compile_expr(
             *asm += movq(reg!(RAX), reg!(RBX));
             *asm += popq(RAX);
             match op {
-                CBinOp::Eq => {
+                ABinOp::Eq => {
                     *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::Z, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
-                CBinOp::NEq => {
+                ABinOp::NEq => {
                     *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::NZ, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
-                CBinOp::Lt => {
+                ABinOp::Lt => {
                     *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::L, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
-                CBinOp::Le => {
+                ABinOp::Le => {
                     *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::LE, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
-                CBinOp::Gt => {
+                ABinOp::Gt => {
                     *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::G, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
-                CBinOp::Ge => {
+                ABinOp::Ge => {
                     *asm += cmpq(reg!(RBX), reg!(RAX));
                     *asm += set(instr::Cond::GE, reg!(AL));
                     *asm += movzbq(reg!(AL), RAX);
                 }
-                CBinOp::Add => {
+                ABinOp::Add => {
                     *asm += addq(reg!(RBX), reg!(RAX));
                 }
-                CBinOp::Sub => {
+                ABinOp::Sub => {
                     *asm += subq(reg!(RBX), reg!(RAX));
                 }
-                CBinOp::Mul => {
+                ABinOp::Mul => {
                     *asm += imulq(reg!(RBX), reg!(RAX));
                 }
-                CBinOp::Div => {
+                ABinOp::Div => {
                     *asm += cqto();
                     *asm += idivq(reg!(RBX));
                 }
-                CBinOp::Mod => {
+                ABinOp::Mod => {
                     *asm += movq(immq(0), reg!(RDX));
                     *asm += idivq(reg!(RBX));
                     *asm += movq(reg!(RDX), reg!(RAX));
                 }
-                CBinOp::LAnd(_) | CBinOp::LOr(_) => unreachable!(),
+                ABinOp::LAnd(_) | ABinOp::LOr(_) => unreachable!(),
             }
         }
-        CExpr::BinOp { op, lhs, rhs } => {
+        AExpr::BinOp { op, lhs, rhs } => {
             compile_expr(*lhs, asm, name_of, deps, fun_id);
             *asm += testq(reg!(RAX), reg!(RAX));
-            let label = if let CBinOp::LAnd(unique_id) = op {
+            let label = if let ABinOp::LAnd(unique_id) = op {
                 let label =
                     reg::Label::from_str(format!("endboolexpr{}", unique_id));
                 *asm += jz(label.clone());
                 label
-            } else if let CBinOp::LOr(unique_id) = op {
+            } else if let ABinOp::LOr(unique_id) = op {
                 let label =
                     reg::Label::from_str(format!("endboolexpr{}", unique_id));
                 *asm += jnz(label.clone());
@@ -202,18 +202,18 @@ fn compile_expr(
             *asm += set(instr::Cond::NZ, reg!(AL));
             *asm += movzbq(reg!(AL), RAX);
         }
-        CExpr::PrefixOp { op, e, arg } => {
+        AExpr::PrefixOp { op, e, arg } => {
             push_addr(*e, asm, name_of, deps, fun_id);
-            *asm += if let CUnOp::Add = op { addq } else { subq }(
+            *asm += if let AUnOp::Add = op { addq } else { subq }(
                 immq(arg),
                 addr!(RAX),
             );
             *asm += movq(addr!(RAX), reg!(RAX));
         }
-        CExpr::PostfixOp { op, e, arg } => {
+        AExpr::PostfixOp { op, e, arg } => {
             push_addr(*e, asm, name_of, deps, fun_id);
             *asm += movq(addr!(RAX), reg!(RBX));
-            *asm += if let CUnOp::Add = op { addq } else { subq }(
+            *asm += if let AUnOp::Add = op { addq } else { subq }(
                 immq(arg),
                 addr!(RAX),
             );
@@ -225,7 +225,7 @@ fn compile_expr(
 /// Compile an instruction
 /// Should leave the stack pointer unchanged at the end of the instruction
 fn compile_instr(
-    instr: CInstr,
+    instr: AInstr,
     asm: &mut Text,
     // loop start/end
     current_loop: Option<(&reg::Label, &reg::Label)>,
@@ -234,9 +234,9 @@ fn compile_instr(
     fun_id: Id,
 ) {
     match instr {
-        CInstr::EmptyInstr => (),
-        CInstr::ExprInstr(e) => compile_expr(e, asm, name_of, deps, fun_id),
-        CInstr::If {
+        AInstr::EmptyInstr => (),
+        AInstr::ExprInstr(e) => compile_expr(e, asm, name_of, deps, fun_id),
+        AInstr::If {
             cond,
             then_branch,
             else_branch,
@@ -273,7 +273,7 @@ fn compile_instr(
             }
             *asm += Text::label(endif_label);
         }
-        CInstr::While {
+        AInstr::While {
             cond,
             body,
             unique_id,
@@ -295,7 +295,7 @@ fn compile_instr(
             *asm += jmp(loop_start);
             *asm += Text::label(loop_exit);
         }
-        CInstr::For {
+        AInstr::For {
             cond,
             incr,
             body,
@@ -325,10 +325,10 @@ fn compile_instr(
             *asm += jmp(for_start);
             *asm += Text::label(for_exit);
         }
-        CInstr::Block(block) => {
+        AInstr::Block(block) => {
             compile_block(block, asm, current_loop, name_of, deps, fun_id)
         }
-        CInstr::Return(opt_e) => {
+        AInstr::Return(opt_e) => {
             if let Some(e) = opt_e {
                 compile_expr(e, asm, name_of, deps, fun_id);
             } else {
@@ -337,13 +337,13 @@ fn compile_instr(
             *asm += leave();
             *asm += ret()
         }
-        CInstr::Break => *asm += jmp(current_loop.unwrap().1.clone()),
-        CInstr::Continue => *asm += jmp(current_loop.unwrap().0.clone()),
+        AInstr::Break => *asm += jmp(current_loop.unwrap().1.clone()),
+        AInstr::Continue => *asm += jmp(current_loop.unwrap().0.clone()),
     }
 }
 
 fn compile_block(
-    block: CBlock,
+    block: ABlock,
     asm: &mut Text,
     current_loop: Option<(&reg::Label, &reg::Label)>,
     name_of: &[String],
@@ -356,7 +356,7 @@ fn compile_block(
 }
 
 fn compile_fun(
-    fun_decl: CFunDecl,
+    fun_decl: AFunDecl,
     asm: &mut Text,
     name_of: &[String],
     deps: &Tree,
