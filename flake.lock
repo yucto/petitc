@@ -12,11 +12,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1669392036,
-        "narHash": "sha256-d67QRFXs19g9U9Se17MkfpKtRj8Ya99ruBdbQjDehDM=",
+        "lastModified": 1671206197,
+        "narHash": "sha256-DR1obp33z5fhmNRCZJFmmDRsuxK+m61U1hGMGj/evKM=",
         "owner": "theblackbeans",
         "repo": "beans",
-        "rev": "4678a5bdc64a6c5be869bcaea3e3818c62499aff",
+        "rev": "2b3112ed660da4148c09eca77cad3596c6e00aff",
         "type": "github"
       },
       "original": {
