@@ -1,7 +1,7 @@
 use beans::span::Span;
 use colored::Colorize;
 
-use core::fmt;
+use std::fmt;
 
 use crate::{
     ast::*,
@@ -424,10 +424,15 @@ pub type TypedExpr =
 
 pub type TypedFile = File<TypeAnnotation>;
 
+type WithOptionSpan<T> = (T, Option<Span>);
+
 enum Binding {
-    Var(PartialType),
+    Var(WithOptionSpan<PartialType>),
     /// (return type, arguments type)
-    Fun(PartialType, Vec<PartialType>),
+    Fun(
+        WithOptionSpan<PartialType>,
+        Vec<WithOptionSpan<PartialType>>,
+    ),
 }
 
 /// old name <=> var/fun, pos (if different from malloc and putchar), new name
@@ -439,19 +444,28 @@ fn get_fun<'env>(
     ident: WithSpan<Ident>,
     name_of: &'_ [String],
 ) -> Result<(
-    (PartialType, &'env [PartialType]),
+    (
+        WithOptionSpan<PartialType>,
+        &'env [WithOptionSpan<PartialType>],
+    ),
     &'env Option<Span>,
     Ident,
 )> {
-    if let Some((_, (Binding::Fun(ty, args), span, new_name))) =
-        env.get(&ident.inner)
-    {
-        Ok(((*ty, &args), span, *new_name))
-    } else {
-        Err(Error::new(ErrorKind::NameError {
+    match env.get(&ident.inner) {
+        Some((_, (Binding::Fun(ty, args), span, new_name))) => {
+            Ok(((ty.clone(), &args), span, *new_name))
+        }
+        Some((_, (Binding::Var(_), span, _))) => {
+            Err(Error::new(ErrorKind::SymbolIsVariable {
+                name: name_of[ident.inner].clone(),
+                span: ident.span,
+                definition_span: span.clone(),
+            }))
+        }
+        None => Err(Error::new(ErrorKind::NameError {
             name: name_of[ident.inner].clone(),
             span: ident.span,
-        }))
+        })),
     }
 }
 
@@ -459,21 +473,32 @@ fn get_var(
     env: &Environment,
     ident: WithSpan<Ident>,
     name_of: &[String],
-) -> Result<(PartialType, Ident)> {
-    if let Some((_, (Binding::Var(ty), _, new_name))) = env.get(&ident.inner) {
-        Ok((*ty, *new_name))
-    } else {
-        Err(Error::new(ErrorKind::NameError {
+) -> Result<(WithOptionSpan<PartialType>, Ident)> {
+    match env.get(&ident.inner) {
+        Some((_, (Binding::Fun(_, _), span, _))) => {
+            Err(Error::new(ErrorKind::SymbolIsFunction {
+                name: name_of[ident.inner].clone(),
+                span: ident.span,
+                definition_span: span.clone(),
+            }))
+        }
+        Some((_, (Binding::Var(ty), _, new_name))) => {
+            Ok((ty.clone(), *new_name))
+        }
+        None => Err(Error::new(ErrorKind::NameError {
             name: name_of[ident.inner].clone(),
             span: ident.span,
-        }))
+        })),
     }
 }
 
 fn insert_new_fun<'env>(
     env: &'env mut Environment,
     ident: Ident,
-    fun_binding: (PartialType, Vec<PartialType>),
+    fun_binding: (
+        WithOptionSpan<PartialType>,
+        Vec<WithOptionSpan<PartialType>>,
+    ),
     span: Option<Span>,
     fun_is_toplevel: bool,
     name_of: &'_ mut Vec<String>,
@@ -502,7 +527,7 @@ fn insert_new_fun<'env>(
 fn insert_new_var<'env>(
     env: &'env mut Environment,
     ident: Ident,
-    var_binding: PartialType,
+    var_binding: WithOptionSpan<PartialType>,
     span: Span,
 ) -> Ident {
     env.insert(ident, (Binding::Var(var_binding), Some(span), ident));
@@ -514,8 +539,10 @@ fn type_expr(
     e: WithSpan<Expr<SpanAnnotation>>,
     env: &Environment,
     name_of: &[String],
+    // Whether this expression will be discarded
+    discarded: bool,
 ) -> PartiallyTypedExpr {
-    match e.inner {
+    let expr = match e.inner {
         Expr::True => {
             WithType::new(Some(Expr::True), PartialType::BOOL, e.span)
         }
@@ -529,10 +556,10 @@ fn type_expr(
             WithType::new(Some(Expr::Int(n)), PartialType::INT, e.span)
         }
         Expr::Ident(name) => {
-            let (ty, new_name) = get_var(env, name.clone(), name_of)
+            let ((ty, _), new_name) = get_var(env, name.clone(), name_of)
                 .unwrap_or_else(|error| {
                     report_error(error);
-                    (PartialType::ERROR, name.inner)
+                    ((PartialType::ERROR, None), name.inner)
                 });
             WithType::new(
                 Some(Expr::Ident(WithSpan {
@@ -569,12 +596,12 @@ fn type_expr(
 			))
 		)
             }
-            let inner_e = type_expr(*inner_e, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of, false);
             let ty = inner_e.ty.ptr();
             WithType::new(Some(Expr::Addr(Box::new(inner_e))), ty, e.span)
         }
         Expr::Deref(inner_e) => {
-            let inner_e = type_expr(*inner_e, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of, false);
 
             let ty: PartialType = if let Some(ty) = inner_e.ty.deref_ptr() {
                 if ty.is_void() {
@@ -602,17 +629,38 @@ fn type_expr(
                     span: lhs.span.clone(),
                 }));
             }
-            let lhs = type_expr(*lhs, env, name_of);
-            let rhs = type_expr(*rhs, env, name_of);
+            let var_span = match lhs.inner {
+                Expr::Ident(ref ident) => {
+                    let id = ident.inner;
+                    env.get(&id).map(|(_, (binding, _, _))| match binding {
+                        Binding::Fun((_, span), _) => span,
+                        Binding::Var((_, span)) => span,
+                    })
+                }
+                _ => None,
+            };
+            let value_span = rhs.span.clone();
+            let lhs = type_expr(*lhs, env, name_of, false);
+            let rhs = type_expr(*rhs, env, name_of, false);
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
 
             if !ty1.is_eq(&ty2) {
-                report_error(Error::new(ErrorKind::TypeMismatch {
-                    span: e.span.clone(),
-                    expected_type: ty1,
-                    found_type: ty2,
-                }));
+                if let Some(span) = var_span {
+                    report_error(Error::new(ErrorKind::TypeMismatch {
+                        span: value_span,
+                        origin_span: span.clone(),
+                        expected_type: ty1,
+                        found_type: ty2,
+                    }));
+                } else {
+                    report_error(Error::new(ErrorKind::TypeMismatch {
+                        span: e.span.clone(),
+                        expected_type: ty1,
+                        found_type: ty2,
+                        origin_span: None,
+                    }));
+                }
             }
             let found_type = if ty1 == PartialType::ERROR { ty2 } else { ty1 };
             WithType::new(
@@ -631,7 +679,7 @@ fn type_expr(
                     expression_span: inner_e.span.clone(),
                 }))
             }
-            let inner_e = type_expr(*inner_e, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of, false);
             let ty = inner_e.ty;
             WithType::new(
                 Some(Expr::Assign {
@@ -661,7 +709,7 @@ fn type_expr(
                     expression_span: inner_e.span.clone(),
                 }))
             }
-            let inner_e = type_expr(*inner_e, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of, false);
             let ty = inner_e.ty;
             WithType::new(
                 Some(Expr::Assign {
@@ -691,7 +739,7 @@ fn type_expr(
                     expression_span: inner_e.span.clone(),
                 }))
             }
-            let inner_e = type_expr(*inner_e, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of, false);
             let ty = inner_e.ty;
             let one = Box::new(WithType::new(
                 Some(Expr::Int(1)),
@@ -731,7 +779,7 @@ fn type_expr(
                     expression_span: inner_e.span.clone(),
                 }))
             }
-            let inner_e = type_expr(*inner_e, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of, false);
             let ty = inner_e.ty;
             let one = Box::new(WithType::new(
                 Some(Expr::Int(1)),
@@ -765,7 +813,7 @@ fn type_expr(
             )
         }
         Expr::Pos(inner_e) => {
-            let inner_e = type_expr(*inner_e, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of, false);
             let ty = inner_e.ty;
 
             if !ty.is_eq(&PartialType::INT) {
@@ -773,6 +821,7 @@ fn type_expr(
                     expected_type: PartialType::INT,
                     found_type: ty,
                     span: inner_e.span.clone(),
+                    origin_span: None,
                 }));
             }
             WithType::new(
@@ -783,7 +832,7 @@ fn type_expr(
         }
         // The code here should be the same of the one at the previous branch
         Expr::Neg(inner_e) => {
-            let inner_e = type_expr(*inner_e, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of, false);
             let ty = inner_e.ty;
 
             if !ty.is_eq(&PartialType::INT) {
@@ -791,6 +840,7 @@ fn type_expr(
                     expected_type: PartialType::INT,
                     found_type: ty,
                     span: inner_e.span.clone(),
+                    origin_span: None,
                 }));
             }
             WithType::new(
@@ -800,7 +850,7 @@ fn type_expr(
             )
         }
         Expr::Not(inner_e) => {
-            let inner_e = type_expr(*inner_e, env, name_of);
+            let inner_e = type_expr(*inner_e, env, name_of, false);
             if inner_e.ty.is_void() {
                 report_error(Error::new(ErrorKind::VoidExpression {
                     span: inner_e.span.clone(),
@@ -823,33 +873,18 @@ fn type_expr(
             lhs,
             rhs,
         } => {
-            let lhs = type_expr(*lhs, env, name_of);
-            let rhs = type_expr(*rhs, env, name_of);
+            let lhs = type_expr(*lhs, env, name_of, false);
+            let rhs = type_expr(*rhs, env, name_of, false);
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
 
-            if ty1.is_void() {
-                report_error(Error::new(ErrorKind::VoidExpression {
-                    span: lhs.span.clone(),
-                }));
-            }
-            if ty2.is_void() {
-                report_error(Error::new(ErrorKind::VoidExpression {
-                    span: rhs.span.clone(),
-                }));
-            }
             if !ty1.is_eq(&ty2) {
-                report_error(
-                    Error::new(ErrorKind::TypeMismatch {
-                        span: rhs.span.clone(),
-                        expected_type: ty1,
-                        found_type: ty2,
-                    })
-                    .add_help(format!(
-                        "Type `{}` was expected because the expression ",
-                        format!("{}", ty1).bold()
-                    )),
-                );
+                report_error(Error::new(ErrorKind::TypeMismatch {
+                    span: rhs.span.clone(),
+                    expected_type: ty1,
+                    found_type: ty2,
+                    origin_span: None,
+                }));
             }
             WithType::new(
                 Some(Expr::Op {
@@ -871,8 +906,8 @@ fn type_expr(
             lhs,
             rhs,
         } => {
-            let lhs = type_expr(*lhs, env, name_of);
-            let rhs = type_expr(*rhs, env, name_of);
+            let lhs = type_expr(*lhs, env, name_of, false);
+            let rhs = type_expr(*rhs, env, name_of, false);
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
             if !ty1.is_eq(&PartialType::INT) {
@@ -880,6 +915,7 @@ fn type_expr(
                     span: lhs.span.clone(),
                     expected_type: PartialType::INT,
                     found_type: ty1,
+                    origin_span: None,
                 }));
             }
             if !ty2.is_eq(&PartialType::INT) {
@@ -887,6 +923,7 @@ fn type_expr(
                     span: rhs.span.clone(),
                     expected_type: PartialType::INT,
                     found_type: ty2,
+                    origin_span: None,
                 }));
             }
             WithType::new(
@@ -904,8 +941,8 @@ fn type_expr(
             lhs,
             rhs,
         } => {
-            let lhs = type_expr(*lhs, env, name_of);
-            let rhs = type_expr(*rhs, env, name_of);
+            let lhs = type_expr(*lhs, env, name_of, false);
+            let rhs = type_expr(*rhs, env, name_of, false);
             let mut ty1 = lhs.ty;
             let mut ty2 = rhs.ty;
             let mut new_e = Expr::Op {
@@ -986,8 +1023,8 @@ fn type_expr(
             lhs,
             rhs,
         } => {
-            let lhs = type_expr(*lhs, env, name_of);
-            let rhs = type_expr(*rhs, env, name_of);
+            let lhs = type_expr(*lhs, env, name_of, false);
+            let rhs = type_expr(*rhs, env, name_of, false);
             let ty1 = lhs.ty;
             let ty2 = rhs.ty;
             let new_e = Expr::Op {
@@ -1049,7 +1086,7 @@ fn type_expr(
             WithType::new(Some(new_e), ret_type, e.span)
         }
         Expr::Call { name, args } => {
-            let ((ret_ty, args_ty), fun_span, new_name) =
+            let (((ret_ty, _), args_ty), fun_span, new_name) =
                 match get_fun(env, name.clone(), name_of) {
                     Ok(stuff) => stuff,
                     Err(error) => {
@@ -1065,13 +1102,13 @@ fn type_expr(
                     definition_span: fun_span.clone(),
                     function_name: name_of[name.inner].clone(),
                 }));
-                return WithType::new(None, ret_ty.clone(), e.span);
+                return WithType::new(None, ret_ty, e.span);
             }
 
             let mut typed_args = Vec::new();
 
-            for (arg, ty) in args.into_iter().zip(args_ty.iter()) {
-                let arg = type_expr(arg, env, name_of);
+            for (arg, (ty, ty_span)) in args.into_iter().zip(args_ty.iter()) {
+                let arg = type_expr(arg, env, name_of, false);
                 let arg_ty = arg.ty;
 
                 if !arg_ty.is_eq(ty) {
@@ -1079,6 +1116,7 @@ fn type_expr(
                         expected_type: *ty,
                         found_type: arg_ty,
                         span: arg.span.clone(),
+                        origin_span: ty_span.clone(),
                     }));
                 }
 
@@ -1097,14 +1135,20 @@ fn type_expr(
                 e.span,
             )
         }
+    };
+    if !discarded && expr.ty.is_void() {
+        report_error(Error::new(ErrorKind::VoidExpression {
+            span: expr.span.clone(),
+        }));
     }
+    expr
 }
 
 /// The returned instruction can't be a for variant with a variable declaration
 fn typecheck_instr(
     instr: WithSpan<Instr<SpanAnnotation>>,
     loop_level: usize,
-    expected_return_type: PartialType,
+    (return_type, return_type_span): WithOptionSpan<PartialType>,
     env: &mut Environment,
     name_of: &mut Vec<String>,
 ) -> TypedInstr<Instr<PartialTypeAnnotation>, PartialType> {
@@ -1113,62 +1157,55 @@ fn typecheck_instr(
             instr: Instr::EmptyInstr,
             span: instr.span,
             loop_level,
-            expected_return_type,
+            expected_return_type: return_type,
         },
         Instr::ExprInstr(e) => TypedInstr {
-            instr: Instr::ExprInstr(type_expr(e, env, name_of)),
+            instr: Instr::ExprInstr(type_expr(e, env, name_of, true)),
             span: instr.span,
             loop_level,
-            expected_return_type,
+            expected_return_type: return_type,
         },
         Instr::If {
             cond,
             then_branch,
             else_branch,
         } => {
-            let cond = type_expr(cond, env, name_of);
+            let cond = type_expr(cond, env, name_of, false);
             let then_branch = typecheck_instr(
                 *then_branch,
                 loop_level,
-                expected_return_type.clone(),
+                (return_type, return_type_span.clone()),
                 env,
                 name_of,
             );
-            let else_branch = if let Some(else_branch) = *else_branch {
-                Some(typecheck_instr(
+            let else_branch = else_branch.map(|else_branch| {
+                typecheck_instr(
                     else_branch,
                     loop_level,
-                    expected_return_type.clone(),
+                    (return_type, return_type_span.clone()),
                     env,
                     name_of,
-                ))
-            } else {
-                None
-            };
-            if cond.ty.is_void() {
-                report_error(Error::new(ErrorKind::VoidExpression {
-                    span: cond.span.clone(),
-                }));
-            }
-            if then_branch.expected_return_type != expected_return_type {
+                )
+            });
+            if then_branch.expected_return_type != return_type {
                 report_error(
                     Error::new(ErrorKind::TypeMismatch {
                         span: then_branch.span.clone(),
-                        expected_type: expected_return_type.clone(),
-                        found_type: then_branch.expected_return_type.clone(),
+                        expected_type: return_type.clone(),
+                        found_type: then_branch.expected_return_type,
+                        origin_span: None,
                     })
                     .add_help(String::from("this should not happen")),
                 );
             }
             if let Some(ref else_branch) = else_branch {
-                if else_branch.expected_return_type != expected_return_type {
+                if else_branch.expected_return_type != return_type {
                     report_error(
                         Error::new(ErrorKind::TypeMismatch {
                             span: else_branch.span.clone(),
-                            expected_type: expected_return_type.clone(),
-                            found_type: else_branch
-                                .expected_return_type
-                                .clone(),
+                            expected_type: return_type.clone(),
+                            found_type: else_branch.expected_return_type,
+                            origin_span: None,
                         })
                         .add_help(String::from("this should not happen")),
                     );
@@ -1183,15 +1220,15 @@ fn typecheck_instr(
                 },
                 span: instr.span,
                 loop_level,
-                expected_return_type,
+                expected_return_type: return_type,
             }
         }
         Instr::While { cond, body } => {
-            let cond = type_expr(cond, env, name_of);
+            let cond = type_expr(cond, env, name_of, false);
             let body = typecheck_instr(
                 *body,
                 loop_level + 1,
-                expected_return_type.clone(),
+                (return_type, return_type_span.clone()),
                 env,
                 name_of,
             );
@@ -1200,12 +1237,13 @@ fn typecheck_instr(
                     span: cond.span.clone(),
                 }));
             }
-            if body.expected_return_type != expected_return_type {
+            if body.expected_return_type != return_type {
                 report_error(
                     Error::new(ErrorKind::TypeMismatch {
-                        expected_type: expected_return_type.clone(),
+                        expected_type: return_type.clone(),
                         found_type: body.expected_return_type.clone(),
                         span: body.span.clone(),
+                        origin_span: None,
                     })
                     .add_help(String::from("this should not happen")),
                 );
@@ -1217,7 +1255,7 @@ fn typecheck_instr(
                 },
                 span: instr.span,
                 loop_level,
-                expected_return_type,
+                expected_return_type: return_type,
             }
         }
         Instr::For {
@@ -1226,15 +1264,15 @@ fn typecheck_instr(
             incr,
             body,
         } => {
-            let cond = cond.map(|cond| type_expr(cond, env, name_of));
+            let cond = cond.map(|cond| type_expr(cond, env, name_of, false));
             let incr = incr
                 .into_iter()
-                .map(|incr| type_expr(incr, env, name_of))
+                .map(|incr| type_expr(incr, env, name_of, false))
                 .collect::<Vec<_>>();
             let body = Box::new(typecheck_instr(
                 *body,
                 loop_level + 1,
-                expected_return_type.clone(),
+                (return_type, return_type_span.clone()),
                 env,
                 name_of,
             ));
@@ -1247,12 +1285,13 @@ fn typecheck_instr(
                 }
             }
 
-            if body.expected_return_type != expected_return_type {
+            if body.expected_return_type != return_type {
                 report_error(
                     Error::new(ErrorKind::TypeMismatch {
-                        expected_type: expected_return_type.clone(),
-                        found_type: body.expected_return_type.clone(),
+                        expected_type: return_type.clone(),
+                        found_type: body.expected_return_type,
                         span: body.span.clone(),
+                        origin_span: None,
                     })
                     .add_help(String::from("this should not happen")),
                 );
@@ -1266,7 +1305,7 @@ fn typecheck_instr(
                 },
                 span: instr.span,
                 loop_level,
-                expected_return_type,
+                expected_return_type: return_type,
             }
         }
         Instr::For {
@@ -1291,53 +1330,55 @@ fn typecheck_instr(
                 instr.span,
             ),
             loop_level,
-            expected_return_type,
+            (return_type, return_type_span.clone()),
             env,
             name_of,
         ),
         Instr::Block(block) => typecheck_block(
             block,
             loop_level,
-            expected_return_type,
+            (return_type, return_type_span.clone()),
             env,
             name_of,
         ),
         Instr::Return(None) => {
-            if !expected_return_type.is_void() {
+            if !return_type.is_void() {
                 report_error(Error::new(ErrorKind::TypeMismatch {
                     span: instr.span.clone(),
-                    expected_type: expected_return_type.clone(),
+                    expected_type: return_type.clone(),
                     found_type: PartialType::VOID,
+		    origin_span: return_type_span.clone(),
                 })
                     .reason(String::from(
 			"a `return` statement without arguments requires the current function to have a return type `void`"
 		    ))
                     .add_help(format!(
 			"try adding an argument `{}`",
-			format!("return /* {expected_return_type} */;").bold())
+			format!("return /* {return_type} */;").bold())
 		    ));
             }
             TypedInstr {
                 instr: Instr::Return(None),
                 span: instr.span,
                 loop_level,
-                expected_return_type,
+                expected_return_type: return_type,
             }
         }
         Instr::Return(Some(e)) => {
-            let e = type_expr(e, env, name_of);
-            if !e.ty.is_eq(&expected_return_type) {
+            let e = type_expr(e, env, name_of, return_type.is_void());
+            if !e.ty.is_eq(&return_type) {
                 report_error(Error::new(ErrorKind::TypeMismatch {
                     span: instr.span.clone(),
-                    expected_type: expected_return_type.clone(),
+                    expected_type: return_type,
                     found_type: e.ty.clone(),
+                    origin_span: return_type_span,
                 }))
             }
             TypedInstr {
                 instr: Instr::Return(Some(e)),
                 span: instr.span,
                 loop_level,
-                expected_return_type,
+                expected_return_type: return_type,
             }
         }
         Instr::Break | Instr::Continue => {
@@ -1354,7 +1395,7 @@ fn typecheck_instr(
                 },
                 span: instr.span,
                 loop_level,
-                expected_return_type,
+                expected_return_type: return_type,
             }
         }
     }
@@ -1383,7 +1424,7 @@ fn assert_var_is_not_reused(
 fn typecheck_block(
     block: Block<SpanAnnotation>,
     loop_level: usize,
-    expected_return_type: PartialType,
+    (return_type, return_type_span): WithOptionSpan<PartialType>,
     env: &mut Environment,
     name_of: &mut Vec<String>,
 ) -> TypedInstr<Instr<PartialTypeAnnotation>, PartialType> {
@@ -1432,7 +1473,10 @@ fn typecheck_block(
                 let new_name = insert_new_var(
                     env,
                     var_decl.inner.name.inner,
-                    var_decl.inner.ty.inner.from_basic(),
+                    (
+                        var_decl.inner.ty.inner.from_basic(),
+                        Some(var_decl.inner.ty.span.clone()),
+                    ),
                     var_decl.span.clone(),
                 );
 
@@ -1465,7 +1509,7 @@ fn typecheck_block(
                     let typed_assign = typecheck_instr(
                         assign,
                         loop_level,
-                        expected_return_type,
+                        (return_type, return_type_span.clone()),
                         env,
                         name_of,
                     );
@@ -1476,7 +1520,7 @@ fn typecheck_block(
                 typed_block.push(DeclOrInstr::Instr(typecheck_instr(
                     instr,
                     loop_level,
-                    expected_return_type,
+                    (return_type, return_type_span.clone()),
                     env,
                     name_of,
                 )))
@@ -1493,7 +1537,7 @@ fn typecheck_block(
         }),
         span: block.span,
         loop_level,
-        expected_return_type,
+        expected_return_type: return_type,
     }
 }
 
@@ -1527,11 +1571,14 @@ fn typecheck_fun(
         env,
         decl.inner.name.inner,
         (
-            decl.inner.ty.inner.from_basic(),
+            (
+                decl.inner.ty.inner.from_basic(),
+                Some(decl.inner.ty.span.clone()),
+            ),
             decl.inner
                 .params
                 .iter()
-                .map(|(ty, _)| ty.inner.from_basic())
+                .map(|(ty, _)| (ty.inner.from_basic(), Some(ty.span.clone())))
                 .collect(),
         ),
         Some(decl.span.clone()),
@@ -1542,7 +1589,10 @@ fn typecheck_fun(
     let typed_instr = typecheck_block(
         WithSpan::new(code, decl.inner.code.span),
         0,
-        decl.inner.ty.inner.from_basic(),
+        (
+            decl.inner.ty.inner.from_basic(),
+            Some(decl.inner.ty.span.clone()),
+        ),
         env,
         name_of,
     );
@@ -1611,7 +1661,10 @@ pub fn typecheck(
     env.insert(
         0,
         (
-            Binding::Fun(PartialType::VOID.ptr(), vec![PartialType::INT]),
+            Binding::Fun(
+                (PartialType::VOID.ptr(), None),
+                vec![(PartialType::INT, None)],
+            ),
             None,
             0,
         ),
@@ -1620,7 +1673,10 @@ pub fn typecheck(
     env.insert(
         1,
         (
-            Binding::Fun(PartialType::INT, vec![PartialType::INT]),
+            Binding::Fun(
+                (PartialType::INT, None),
+                vec![(PartialType::INT, None)],
+            ),
             None,
             1,
         ),
