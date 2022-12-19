@@ -2,7 +2,7 @@
   description = "petitc";
   inputs = {
     beans = {
-      url = github:theblackbeans/beans;
+      url = github:jthulhu/beans;
       inputs = {
         nixpkgs.follows = "nixpkgs";
         utils.follows = "utils";
