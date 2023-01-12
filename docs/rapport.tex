@@ -91,19 +91,20 @@ toujours \verb|int|, indépendemment du type de $e$, ou d'un appel à une foncti
 dont le type de retour ne dépend pas du type des arguments.\par
 Une erreur est levée si un n\oe{}ud ne peut pas être bien typé mais tous ses enfants
 le sont. À terme, l'AST obtenu en fin de typage sera annoté au minimum, les annotations
-utiles à la compilation seront ajoutées dans une autre passe. Actuellement, une partie
-du travail effectué dans \verb|compile_annotation.rs| (élimination des for avec déclaration de
-variable et transformation des déclaration avec assignation en deux instructions distinctes)
-est déjà effectué dans \verb|typechecker.rs|. Pendant le typage, on rend unique les noms de toutes
-les fonctions en les remplaçant par \verb|fun_NomdelafonctionLigne-Colonne| avec Ligne et Colonne les
-emplacements du début de sa déclaration dans le fichier. De plus, les expressions \verb|++i| et \verb|--i|
-sont remplacées par \verb|i = i + 1| et \verb|i = i - 1|, et les expressions \verb|i++| et \verb|i--| sont remplacées
+utiles à la compilation seront ajoutées dans une autre passe. Pendant cette étape,
+on supprime aussi les for avec déclaration de variables et les déclarations de variables
+avec assignation. Pendant le typage, on rend unique les noms de toutes
+les fonctions en les remplaçant par \verb|fun_NomdelafonctionLigne.Colonne| avec Ligne et Colonne les
+emplacements du début de sa déclaration dans le fichier, sauf pour la fonction \verb|main|.
+
+Précédemment, les expressions \verb|++i| et \verb|--i|
+étaient remplacées par \verb|i = i + 1| et \verb|i = i - 1|, et les expressions \verb|i++| et \verb|i--| étaient remplacées
 par les expressions \verb|(i = i + 1) - 1| et \verb|(i = i - 1) + 1|.\par
 En fait, cette dernière étape est fausse. En effet, dans la nouvelle expression,
 \(i\) est évaluée deux fois, et non une; si \(i\) a un effet de bord, cela pose
 problème. Le programme suivant affiche \verb|a| quand compilé par gcc, et
-\verb|b| quand compilé par notre compilateur. Ce problème sera résolu
-prochainement.
+\verb|b| quand compilé par l'ancienne version de notre compilateur. Ce problème a été résolu
+en conservant les expressions ++i, i++, --i et i-- jusqu'à l'étape de production de code. 
 \begin{minted}[
   frame=lines,
   framesep=2mm,
@@ -120,6 +121,7 @@ int main() {
 La structure de donnée utilisée pour stocker les variables présentes dans
 l'environnement est impérative. Elle consiste d'une pile de tables de hashage,
 correspondant aux portées imbriquées.
+
 \section*{Génération d'erreurs}
 Les erreurs syntaxiques sont fatales, dans le sens que le compilateur s'arrête
 à la première, sans essayer de typer ce qui a été compris. Cependant, pour rendre
@@ -142,11 +144,25 @@ Une fois le code typé, on peut l'annoter avec des informations utiles à la com
 Notamment, on transforme toutes les variables en couple (offset, profondeur), offset représentant
 le décalage par rapport au tableau d'activation et profondeur la profondeur de la fonction parent dans
 laquelle elle a été déclarée. De plus, les opérations arithmétiques sur les pointeurs sont modifiées afin
-de prendre en compte la taille du type (p + 1 se traduit en p + 8 si p est de type int*). Enfin,
+de prendre en compte la taille du type (\verb|p + 1| sera traduit en \verb|p + 8| si \verb|p| est
+un pointeur, \verb|++p| incrémentera \verb|p| de \verb|8|, etc.). On associe également un identifiant
+unique à chaque construction \verb|if|, \verb|while| et \verb|for|, pour pouvoir générer des labels
+uniques pour les sauts. Pour les \verb|if|, c'est \verb|ifline.col| avec \verb|line| la ligne et
+\verb|col| la colonne du début du \verb|if|, etc. C'est bien unique car un unique \verb|if|, etc peut
+commencer à la même position. De plus ces labels permettent de cerner facilement d'où vient un problème
+dans l'assembleur ou le code produit produit. Les expressions booléennes devant s'évaluer paresseusement,
+il est également nécessaire de faire un saut dans l'asm produit : c'est pourquoi on génère le label
+avec l'emplacement de la position de fin du premier argument (la position de début du second argument
+aurait également convenu). En effet, pour une expression comme \verb|a && b && c| qui
+est parsée comme \verb|(a && b) && c|, le \verb|&&| intérieur et le \verb|&&| extérieur partagent
+la même position de début. En revanche, le premier caractère qui n'est pas une espace
+ou un saut de ligne après le deuxième argument doit être l'opérateur (\verb|&&| ou \verb?|?),
+et il y a donc au plus une expression qui sera associée à chaque position,
+ce qui rend bien le label unique. Enfin,
 on construit un arbre de dépendances des fonctions pour savoir dans quelle fonction a été déclarée
-telle fonction, on élimine les constructions qui ne sont plus utiles (comme les boucles for avec
-déclaration de variable), et on calcule pour chaque bloc la taille maximum de pile dont il a besoin,
-pour qu'à la compilation, une fonction puisse allouer en une fois toute la pile dont elle a besoin.
+telle fonction et on calcule pour chaque bloc la taille maximum de pile dont il a besoin pour stocker
+des variables pour qu'à la compilation, une fonction puisse allouer en une fois toute la pile
+dont elle a besoin. Cela ne prend pas en compte la pile temporairement allouée pour les calculs.
 
 \section*{Génération de code}
 La génération du code repose sur la librairie \verb|write_x86_64| de Samuel.\par
