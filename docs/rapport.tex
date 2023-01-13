@@ -26,8 +26,8 @@ Par ailleurs, nous utilisons \href{https://github.com/jthulhu/beans}{Beans}
 pour l'analyse lexicale et syntaxique. Beans utilise deux fichiers pour définir
 une grammaire:
 \begin{itemize}
-\item Un fichier de grammaire de l'analyse lexicale, \verb|gmrs/petitc.lx|.
-\item Un fichier de grammaire de l'analyse syntaxique, \verb|gmrs/petitc.gr|.
+  \item Un fichier de grammaire de l'analyse lexicale, \verb|gmrs/petitc.lx|.
+  \item Un fichier de grammaire de l'analyse syntaxique, \verb|gmrs/petitc.gr|.
 \end{itemize}
 Pour les utiliser, il faut les compiler avec \verb|beans compile lexer gmrs/petitc.lx|
 et \verb|beans compile parser --lexer gmrs/petitc.clx gmrs/petitc.gr|. À noter
@@ -76,7 +76,7 @@ L'analyse syntaxique commence par reconnaître l'entrée, ce qui donne une forê
 de toutes les dérivations possibles. Ensuite, grâce aux règles de priorité et
 d'associativité déclarées dans la grammaire, Beans construit explicitement
 un des arbre de dérivation (en appliquant les actions sémantiques au passage).\par
-Les expressions de la forme \(e[i]\) sont du sucre syntaxique pour \(*(e+i)\),
+Les expressions de la forme \verb|e[i]| sont du sucre syntaxique pour \verb|*(e+i)|,
 ce qui signifie que ce sont des actions sémantiques de Beans qui font la
 transformation.
 
@@ -104,7 +104,7 @@ En fait, cette dernière étape est fausse. En effet, dans la nouvelle expressio
 \(i\) est évaluée deux fois, et non une; si \(i\) a un effet de bord, cela pose
 problème. Le programme suivant affiche \verb|a| quand compilé par gcc, et
 \verb|b| quand compilé par l'ancienne version de notre compilateur. Ce problème a été résolu
-en conservant les expressions ++i, i++, --i et i-- jusqu'à l'étape de production de code. 
+en conservant les expressions \verb|++i|, \verb|i++|, \verb|--i| et \verb|i--| jusqu'à l'étape de production de code.
 \begin{minted}[
   frame=lines,
   framesep=2mm,
