@@ -6,10 +6,11 @@
 \usepackage[french]{babel}
 \usepackage[colorlinks=true]{hyperref}
 \usepackage[outputdir=out, cache=false]{minted}
-\usepackage{xcolor}
+\usepackage{xcolor, tcolorbox}
+\usepackage{fancyvrb}
 
-\definecolor{LightGray}{gray}{0.9}
-
+\definecolor{LightGray}{gray}{0.65}
+\tcbuselibrary{skins,breakable}
 \title{Compilateur de PetitC}
 \author{%
   Jean \textsc{Caspar},
@@ -39,7 +40,63 @@ Si le correcteur est intéressé, et s'il utilise Emacs (ce qu'il est susceptibl
 de faire), un plugin Emacs (\href{https://github.com/jthulhu/emacs-beans}{beans.el})
 est mis à disposition. Il fournit les major mode correspondants aux fichiers
 de grammaire lexicale et de grammaire syntaxique. Ce plugin
-\href{https://melpa.org/#/beans}{est disponible sur Melpa}.
+\href{https://melpa.org/#/beans}{est disponible sur Melpa}.\par
+La syntaxe des fichiers de grammaire de Beans est relativement simple
+par ailleurs. Pour ce qui est de la grammaire du lexer, on écrit
+simplement \verb|TERMINAL ::= regex|; on peut éventuellement faire
+précéder cette définition de certains mots-clés qui modifient le
+comportement du lexer
+\begin{itemize}
+\item \verb|ignore| autorise le lexer a reconnaître ce terminal, mais
+  l'informe qu'il faut alors immédiatement l'oublier et essayer
+  de reconnaître un autre terminal.
+\item \verb|unwanted| précise que si jamais le lexer reconnaît ce
+  terminal, il doit signaler une erreur de lexing. C'est principalement
+  utile pour anticiper des typos de la part de l'utilisateur, les
+  reconnaître et les lui signaler avec un message d'erreur spécifique.
+\item \verb|keyword| est du sucre syntaxique qui équivaut à rajouter
+  \verb|\b| (word boundary) à la fin de l'expression régulière. Cela
+  signifie qu'un mot-clé ne peut être reconnu que s'il ne fait pas partie
+  d'un mot plus grand.
+\end{itemize}
+Enfin, ces définitions peuvent aussi être éventuellement précédé
+d'une description du terminal, entre parenthèses. Cette description
+est obligatoire pour les terminaux annotés \verb|unwanted|, et
+correspond alors au message d'erreur affiché.\par
+La grammaire de l'analyseur syntaxique permet le même style de
+définition\\
+\verb|NonTerminal ::= règles;|, où règle est la concaténation
+quelconque de règles de productions. De même que pour les terminaux,
+chaque déclaration peut être précédée d'une description du non-terminal
+entre guillemets.\par
+Chaque règle est formée d'éléments, puis d'éventuelles actions sémantiques,
+entre chevrons. Un élément est composé du nom d'un terminal ou d'un
+non-terminal, suivi éventuellement de l'accès à un attribut avec la
+syntaxe \verb|.attribut|, suivi éventuellement d'une assignation à une
+clé avec la syntaxe \verb|@clé|. Quand Beans va reconstruire l'arbre
+de syntaxe à partir de la forêt de syntaxe, les enfants d'un n\oe{}ud issu
+d'une règle de production seront les éléments qui auront été assigné
+à une clé. Si un accès à un attribut est spécifié, c'est cet attribut
+qui sera assigné à la place du n\oe{}ud tout entier. C'est particulièrement
+utile pour récupérer uniquement un groupe d'un terminal: tous les groupes
+de l'expression régulière utilisée pour définir un terminal sont
+accessibles via l'attribut \(.n\) si le groupe est le \(n\)-ème groupe
+(ie. celui correspondant à la \(n\)-ème ouverture de parenthèses).\par
+Les actions sémantiques permettent de modifier ce comportement, en
+donnant des assignations de la forme \verb|clé: valeur|. La valeur
+peut des valeurs déjà assignées, et peut aussi instancier des nouveaux
+n\oe{}uds de l'arbre syntaxique avec la syntaxe\\
+\verb|NonTerminal { enfants }|. À noter qu'un assignation peut aussi
+ne pas avoir de clé, dans ce cas il s'agit du nom de la règle. On
+peut le voir comme le nom du variant du type somme qui sera utilisé
+pour représenter le n\oe{}ud.\par
+De plus, une règle peut éventuellement être précédé d'une spécification
+d'associativité, entre parenthèses.\par
+Enfin, on peut définir des macros, c'est-à-dire des règles paramétrées
+par des symboles (terminaux ou non-terminaux). Cela permet notamment
+de définir des règles génériques pour reconnaître des listes.\par
+La grammaire de PetitC fait appel à toutes les fonctionnalités
+présentées.
 
 \section*{Analyse lexicale et syntaxique}
 \subsection*{Analyse lexicale}
@@ -53,6 +110,7 @@ signifie que les lexèmes qui ne servent pas au parseur à un moment donné ne
 peuvent pas être reconnus. En particulier, le programme suivant serait compilé
 sans problème, malgré le fait que \verb|int| et \verb|return| sont des mots
 réservés.
+\pagebreak
 \begin{minted}[
   frame=lines,
   framesep=2mm,
@@ -78,7 +136,23 @@ d'associativité déclarées dans la grammaire, Beans construit explicitement
 un des arbre de dérivation (en appliquant les actions sémantiques au passage).\par
 Les expressions de la forme \verb|e[i]| sont du sucre syntaxique pour \verb|*(e+i)|,
 ce qui signifie que ce sont des actions sémantiques de Beans qui font la
-transformation.
+transformation:
+\begin{minted}[
+  frame=lines,
+  framesep=2mm,
+  bgcolor=LightGray,
+  linenos,
+  ]{text}
+  Expr@array LBRACKET Expr@index RBRACKET <
+    Deref
+    value: Expr {
+      BinOp
+      op: AddSubOp { Add }
+      left: array
+      right: index
+    }
+  >
+\end{minted}
 
 \section*{Typage}
 Le typage annote l'AST d'informations de typage. Si jamais il est impossible
@@ -130,12 +204,46 @@ les messages d'erreur plus compréhensibles, le compilateur suggère toujours
 comment corriger une erreur de syntaxe. La qualité de la suggestion dépend du
 nombre de façons de corriger l'erreur: moins il y en a, plus le compilateur peut
 être précis dans sa suggestion.\par
-Les autres erreurs sont accumulées dans une variable statique. Juste avant la génération
-du code (c'est-à-dire, au dernier moment où il n'y a plus d'erreurs), s'il y a
-des erreurs, elles sont affichées, et le compilateur s'arrête.\par
+Par exemple, si le fichier source contient
+\begin{minted}[
+  frame=lines,
+  framesep=2mm,
+  bgcolor=LightGray,
+  linenos,
+  ]{c}
+int main() }
+\end{minted}
+le message d'erreur suivant est affiché, suggérant qu'il manque le
+début du bloc de code\pagebreak
+\begin{tcolorbox}[breakable, colback=LightGray, spartan]%
+  \begin{Verbatim}[commandchars=\\\{\}, formatcom=\color{white}]
+  \textbf{\textcolor{red!80!black}{error}: the token `\}` cannot be recognized here}
+  \textbf{\textcolor{blue}{-->}} test.c:1:11
+\textbf{\textcolor{blue}{    |}}
+\textbf{\textcolor{blue}{1   |}} int main() \}
+\textbf{\textcolor{blue}{    |}            \textcolor{red}{^}}
+\textbf{  \textcolor{blue}{=} help:} try inserting a block right before
+\end{Verbatim}
+\end{tcolorbox}
+Ces indications sont générées automatiquement par Beans (le nom des
+n\oe{}uds de l'arbre syntaxique étant simplement spécifié dans la grammaire),
+aucun code ad-hoc n'est présent dans le compilateur pour cette
+fonctionnalité.\par
+Les autres erreurs sont accumulées dans une variable statique. Juste
+avant la génération du code (c'est-à-dire, au dernier moment où il n'y
+a plus d'erreurs), s'il y a des erreurs, elles sont affichées, et le
+compilateur s'arrête.\par
 Des efforts sont faits pour mettre en contexte les messages d'erreur, y compris
 quand plusieurs parties du code amènent à une erreur (et pas uniquement la
-dernière partie du code qui a amené à l'erreur), et l'afficher joliment.\par
+dernière partie du code qui a amené à l'erreur), et l'afficher joliment.
+Par exemple, des affectations à des variables mal typées (c'est-à-dire,
+où l'expression que l'on essaye d'assigner à la variable n'a pas un
+type compatible avec celui de la variable), à la fois le type de
+l'expression et de la variable sont affichés, et l'emplacement de la
+définition du type de la variable est aussi affiché. Des efforts
+considérables sont faits pour couvrir tous les cas possibles (les deux
+endroits à afficher sont sur la même lignes, ou pas, ou partiellement)
+y compris si le code source fautif s'étend sur plusieurs lignes.\par
 Le sucre syntaxique interfère légèrement avec l'affichage des erreurs, dans la
 mesure où il empêche d'afficher un message d'erreur spécifique à \(e[i]\) si
 cette expression est mal typée.
@@ -151,8 +259,9 @@ unique à chaque construction \verb|if|, \verb|while| et \verb|for|, pour pouvoi
 uniques pour les sauts. Pour les \verb|if|, c'est \verb|ifline.col| avec \verb|line| la ligne et
 \verb|col| la colonne du début du \verb|if|, etc. C'est bien unique car un unique \verb|if|, etc peut
 commencer à la même position. De plus ces labels permettent de cerner facilement d'où vient un problème
-dans l'assembleur ou le code produit produit. Les expressions booléennes devant s'évaluer paresseusement,
-il est également nécessaire de faire un saut dans l'asm produit : c'est pourquoi on génère le label
+dans l'assembly.\par
+Les expressions booléennes devant s'évaluer paresseusement,
+il est également nécessaire de faire un saut dans l'assembly produit: c'est pourquoi on génère le label
 avec l'emplacement de la position de fin du premier argument (la position de début du second argument
 aurait également convenu). En effet, pour une expression comme \verb|a && b && c| qui
 est parsée comme \verb|(a && b) && c|, le \verb|&&| intérieur et le \verb|&&| extérieur partagent
@@ -168,12 +277,14 @@ dont elle a besoin. Cela ne prend pas en compte la pile temporairement allouée 
 \section*{Génération de code}
 La génération du code repose sur la librairie \verb|write_x86_64| de Samuel.\par
 La pile n'est pas alignée en général avant un appel de fonction, donc un petit
-préambule est généré avant chaque appel à \verb|putchar| et \verb|malloc|.\par
+préambule est généré avant chaque appel à \verb|putchar| et \verb|malloc|, et
+est inliné directement (plutôt que d'écrire une fonction à part).\par
 Le résultat de l'évaluation d'une expression est stockée dans \verb|rax|, ce qui
 en particulier évite de bouger le résultat des appels à \verb|malloc|. La pile
 utilisée par chaque fonction est allouée en une seule fois. Pour accéder à l'addresse
 d'une variable, un petit utilitaire \verb|push_addr| se charge de calculer à combien de parent
-il faut remonter pour trouver le bon tableau d'activation. Enfin, pour un appel de fonction,
+il faut remonter pour trouver le bon tableau d'activation.\par
+Enfin, pour un appel de fonction,
 grâce à l'arbre de dépendances, on peut trouver la profondeur du tableau d'activation de la
 fonction appelée grâce à une recherche de LCA (lowest common ancestor) dans l'arbre, sachant
 que la fonction appelée est forcément un fils direct de ce LCA.
